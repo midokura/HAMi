@@ -32,6 +32,7 @@ import (
 type AMDDevices struct {
 	resourceCountName  string
 	resourceMemoryName string
+	resourceCoreName   string
 }
 
 const (
@@ -42,11 +43,14 @@ const (
 	AMDNoUseUUID       = "amd.com/nouse-gpu-uuid"
 	AMDAssignedNode    = "amd.com/predicate-node"
 	Mi300xMemory       = 192000
+	DefaultTotalCUs    = 304 // MI300X default
 )
 
 type AMDConfig struct {
 	ResourceCountName  string `yaml:"resourceCountName"`
 	ResourceMemoryName string `yaml:"resourceMemoryName"`
+	ResourceCoreName   string `yaml:"resourceCoreName"`
+	TotalCUs           int    `yaml:"totalCUs"`
 }
 
 func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
@@ -54,10 +58,19 @@ func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
 	if !ok {
 		device.SupportDevices[AMDDevice] = "hami.io/amd-devices-allocated"
 	}
-	return &AMDDevices{
+	totalCUs := config.TotalCUs
+	if totalCUs <= 0 {
+		totalCUs = DefaultTotalCUs
+	}
+	dev := &AMDDevices{
 		resourceCountName:  config.ResourceCountName,
 		resourceMemoryName: config.ResourceMemoryName,
+		resourceCoreName:   config.ResourceCoreName,
 	}
+	klog.InfoS("AMD GPU device initialized",
+		"totalCUs", totalCUs,
+		"resourceCoreName", config.ResourceCoreName)
+	return dev
 }
 
 func (dev *AMDDevices) CommonWord() string {
@@ -84,24 +97,25 @@ func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 		return []*device.DeviceInfo{}, fmt.Errorf("device not found %s", dev.resourceCountName)
 	}
 	for int64(i) < counts {
+		customInfo := make(map[string]any)
+		customInfo[CUTotalKey] = DefaultTotalCUs
 		nodedevices = append(nodedevices, &device.DeviceInfo{
 			Index:        uint(i),
 			ID:           n.Name + "-" + AMDDevice + "-" + fmt.Sprint(i),
-			Count:        1,
+			Count:        100, // Allow multiple pods to share one GPU via CU partitioning
 			Devmem:       Mi300xMemory,
-			Devcore:      100,
+			Devcore:      int32(DefaultTotalCUs),
 			Type:         AMDDevice,
 			Numa:         0,
 			Health:       true,
-			CustomInfo:   make(map[string]any),
+			CustomInfo:   customInfo,
 			DeviceVendor: AMDCommonWord,
 		})
 		i++
 	}
-	i = 0
-	for i < len(nodedevices) {
-		klog.V(4).Infoln("Registered AMD nodedevices:", nodedevices[i])
-		i++
+	for _, nd := range nodedevices {
+		klog.V(4).InfoS("Registered AMD nodedevice",
+			"id", nd.ID, "totalCUs", DefaultTotalCUs, "mem", nd.Devmem)
 	}
 	return nodedevices, nil
 }
@@ -142,33 +156,58 @@ func (dev *AMDDevices) GetResourceNames() device.ResourceNames {
 	return device.ResourceNames{
 		ResourceCountName:  dev.resourceCountName,
 		ResourceMemoryName: dev.resourceMemoryName,
-		ResourceCoreName:   "",
+		ResourceCoreName:   dev.resourceCoreName,
 	}
 }
 
 func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
 	klog.Info("Start to count AMD devices for container ", ctr.Name)
 	amdResourceCount := corev1.ResourceName(dev.resourceCountName)
-	//amdResourceMemory := corev1.ResourceName(dev.resourceMemoryName)
 	v, ok := ctr.Resources.Limits[amdResourceCount]
 	if !ok {
 		v, ok = ctr.Resources.Requests[amdResourceCount]
 	}
-	if ok {
-		if n, ok := v.AsInt64(); ok {
-			klog.InfoS("Detected AMD device request",
-				"container", ctr.Name,
-				"deviceCount", n)
-			return device.ContainerDeviceRequest{
-				Nums:             int32(n),
-				Type:             AMDDevice,
-				Memreq:           Mi300xMemory,
-				MemPercentagereq: 0,
-				Coresreq:         0,
+	if !ok {
+		return device.ContainerDeviceRequest{}
+	}
+	n, ok := v.AsInt64()
+	if !ok {
+		return device.ContainerDeviceRequest{}
+	}
+
+	// Parse memory request (MB)
+	memreq := int32(Mi300xMemory)
+	if dev.resourceMemoryName != "" {
+		if mv, ok := ctr.Resources.Limits[corev1.ResourceName(dev.resourceMemoryName)]; ok {
+			if m, ok := mv.AsInt64(); ok {
+				memreq = int32(m)
 			}
 		}
 	}
-	return device.ContainerDeviceRequest{}
+
+	// Parse CU (core) request - number of CUs, not percentage
+	coresreq := int32(0) // 0 means use all available CUs
+	if dev.resourceCoreName != "" {
+		if cv, ok := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCoreName)]; ok {
+			if c, ok := cv.AsInt64(); ok {
+				coresreq = int32(c)
+			}
+		}
+	}
+
+	klog.InfoS("Detected AMD device request",
+		"container", ctr.Name,
+		"deviceCount", n,
+		"memreq", memreq,
+		"coresreq(CUs)", coresreq)
+
+	return device.ContainerDeviceRequest{
+		Nums:             int32(n),
+		Type:             AMDDevice,
+		Memreq:           memreq,
+		MemPercentagereq: 0,
+		Coresreq:         coresreq,
+	}
 }
 
 func (dev *AMDDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
@@ -179,64 +218,142 @@ func (dev *AMDDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, 
 	n.Used++
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
+
+	// Apply CU allocation to device bitmap
+	if ctr.CustomInfo != nil {
+		if cuStart, ok := ctr.CustomInfo[CUStartKey]; ok {
+			if cuCount, ok := ctr.CustomInfo[CUCountKey]; ok {
+				if n.CustomInfo == nil {
+					n.CustomInfo = make(map[string]any)
+				}
+				totalCUs := getTotalCUs(n.CustomInfo)
+				bitmap := getCUBitmap(n.CustomInfo, totalCUs)
+				allocateCUs(bitmap, cuStart.(int), cuCount.(int))
+				klog.InfoS("Applied CU allocation to device usage",
+					"device", n.ID,
+					"cuStart", cuStart, "cuCount", cuCount,
+					"freeRemaining", countFreeCUs(bitmap, totalCUs))
+			}
+		}
+	}
 	return nil
 }
 
 func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeinfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
-	originReq := k.Nums
-	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
+	klog.InfoS("Allocating AMD device for container request",
+		"pod", klog.KObj(pod),
+		"gpuCount", k.Nums,
+		"memreq", k.Memreq,
+		"coresreq(CUs)", k.Coresreq)
+
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
+
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
-		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
-		klog.V(3).InfoS("Type check", "device", dev.Type, "req", k.Type, "dev=", dev)
+		// Type check
 		if !strings.Contains(dev.Type, k.Type) {
 			reason[common.CardTypeMismatch]++
 			continue
 		}
-
 		_, found, _ := amddevice.checkType(k)
 		if !found {
 			reason[common.CardTypeMismatch]++
-			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
 			continue
 		}
+
+		// UUID check
 		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, AMDUseUUID, AMDNoUseUUID, amddevice.CommonWord()) {
 			reason[common.CardUUIDMismatch]++
-			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue
 		}
 
-		if dev.Count <= dev.Used {
-			reason[common.CardTimeSlicingExhausted]++
-			klog.V(5).InfoS(common.CardTimeSlicingExhausted, "pod", klog.KObj(pod), "device", dev.ID, "count", dev.Count, "used", dev.Used)
+		// Memory check
+		availMem := dev.Totalmem - dev.Usedmem
+		if k.Memreq > 0 && availMem < k.Memreq {
+			reason[common.CardInsufficientMemory]++
+			klog.V(5).InfoS("Insufficient memory",
+				"device", dev.ID,
+				"available", availMem, "requested", k.Memreq)
 			continue
 		}
 
-		klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
+		// CU availability check via bitmap
+		if dev.CustomInfo == nil {
+			dev.CustomInfo = make(map[string]any)
+		}
+		requestedCUs := int(k.Coresreq)
+		if requestedCUs > 0 {
+			totalCUs := getTotalCUs(dev.CustomInfo)
+			bitmap := getCUBitmap(dev.CustomInfo, totalCUs)
+			if findFreeCURange(bitmap, totalCUs, requestedCUs) < 0 {
+				reason[common.CardInsufficientCore]++
+				klog.V(5).InfoS("Insufficient CUs",
+					"device", dev.ID,
+					"requested", requestedCUs,
+					"free", countFreeCUs(bitmap, totalCUs))
+				continue
+			}
+		}
+
+		klog.V(5).InfoS("Found fit device", "pod", klog.KObj(pod), "device", dev.ID)
 
 		if k.Nums > 0 {
 			k.Nums--
+
+			// Allocate CU range from bitmap
+			containerCustomInfo := make(map[string]any)
+			if requestedCUs > 0 {
+				mask, cuStart, ok := tryAllocateCUs(dev.CustomInfo, int(dev.Index), requestedCUs)
+				if !ok {
+					reason[common.CardInsufficientCore]++
+					k.Nums++ // rollback
+					continue
+				}
+				containerCustomInfo[CUMaskKey] = mask
+				containerCustomInfo[CUStartKey] = cuStart
+				containerCustomInfo[CUCountKey] = requestedCUs
+			}
+
 			tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
 				Idx:        int(dev.Index),
 				UUID:       dev.ID,
 				Type:       k.Type,
-				Usedmem:    Mi300xMemory,
-				Usedcores:  0,
-				CustomInfo: map[string]any{},
+				Usedmem:    k.Memreq,
+				Usedcores:  k.Coresreq,
+				CustomInfo: containerCustomInfo,
 			})
 		}
 		if k.Nums == 0 {
-			klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
+			klog.InfoS("AMD device allocate success",
+				"pod", klog.KObj(pod),
+				"devices", tmpDevs)
 			return true, tmpDevs, ""
 		}
 	}
+
+	// Rollback CU allocations on failure
 	if len(tmpDevs) > 0 {
+		for _, cds := range tmpDevs {
+			for _, cd := range cds {
+				if cd.CustomInfo != nil {
+					if cuStart, ok := cd.CustomInfo[CUStartKey]; ok {
+						if cuCount, ok := cd.CustomInfo[CUCountKey]; ok {
+							for _, dev := range devices {
+								if dev.ID == cd.UUID && dev.CustomInfo != nil {
+									totalCUs := getTotalCUs(dev.CustomInfo)
+									bitmap := getCUBitmap(dev.CustomInfo, totalCUs)
+									freeCUs(bitmap, cuStart.(int), cuCount.(int))
+								}
+							}
+						}
+					}
+				}
+			}
+		}
 		reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs)
-		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
