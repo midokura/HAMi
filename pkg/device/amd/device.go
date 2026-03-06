@@ -33,6 +33,8 @@ type AMDDevices struct {
 	resourceCountName  string
 	resourceMemoryName string
 	resourceCoreName   string
+	totalCUs           int
+	totalMemoryMB      int32
 }
 
 const (
@@ -51,6 +53,7 @@ type AMDConfig struct {
 	ResourceMemoryName string `yaml:"resourceMemoryName"`
 	ResourceCoreName   string `yaml:"resourceCoreName"`
 	TotalCUs           int    `yaml:"totalCUs"`
+	TotalMemoryMB      int32  `yaml:"totalMemoryMB"`
 }
 
 func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
@@ -64,13 +67,20 @@ func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
 	if totalCUs <= 0 {
 		totalCUs = DefaultTotalCUs
 	}
+	totalMemoryMB := config.TotalMemoryMB
+	if totalMemoryMB <= 0 {
+		totalMemoryMB = Mi300xMemory
+	}
 	dev := &AMDDevices{
 		resourceCountName:  config.ResourceCountName,
 		resourceMemoryName: config.ResourceMemoryName,
 		resourceCoreName:   config.ResourceCoreName,
+		totalCUs:           totalCUs,
+		totalMemoryMB:      totalMemoryMB,
 	}
 	klog.InfoS("AMD GPU device initialized",
 		"totalCUs", totalCUs,
+		"totalMemoryMB", totalMemoryMB,
 		"resourceCoreName", config.ResourceCoreName)
 	return dev
 }
@@ -100,13 +110,13 @@ func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 	}
 	for int64(i) < counts {
 		customInfo := make(map[string]any)
-		customInfo[CUTotalKey] = DefaultTotalCUs
+		customInfo[CUTotalKey] = dev.totalCUs
 		nodedevices = append(nodedevices, &device.DeviceInfo{
 			Index:        uint(i),
 			ID:           n.Name + "-" + AMDDevice + "-" + fmt.Sprint(i),
 			Count:        100, // Allow multiple pods to share one GPU via CU partitioning
-			Devmem:       Mi300xMemory,
-			Devcore:      int32(DefaultTotalCUs),
+			Devmem:       dev.totalMemoryMB,
+			Devcore:      int32(dev.totalCUs),
 			Type:         AMDDevice,
 			Numa:         0,
 			Health:       true,
@@ -117,7 +127,7 @@ func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 	}
 	for _, nd := range nodedevices {
 		klog.V(4).InfoS("Registered AMD nodedevice",
-			"id", nd.ID, "totalCUs", DefaultTotalCUs, "mem", nd.Devmem)
+			"id", nd.ID, "totalCUs", dev.totalCUs, "mem", nd.Devmem)
 	}
 	return nodedevices, nil
 }
@@ -178,7 +188,7 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 	}
 
 	// Parse memory request (MB)
-	memreq := int32(Mi300xMemory)
+	memreq := dev.totalMemoryMB
 	if dev.resourceMemoryName != "" {
 		if mv, ok := ctr.Resources.Limits[corev1.ResourceName(dev.resourceMemoryName)]; ok {
 			if m, ok := mv.AsInt64(); ok {
