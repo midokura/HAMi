@@ -32,6 +32,10 @@ import (
 // ContainerDevice.CustomInfo for the device plugin to inject.
 
 const (
+	// maxCUBits is the maximum number of CU bits supported in the bitmap.
+	// This is a safety limit to prevent unbounded bit manipulation.
+	maxCUBits = 1024
+
 	// CustomInfo keys
 	CUBitmapKey  = "cu_bitmap"  // *big.Int stored in DeviceUsage.CustomInfo
 	CUTotalKey   = "cu_total"   // int: total CUs on this device
@@ -97,17 +101,27 @@ func findFreeCURange(bitmap *big.Int, totalCUs, count int) int {
 }
 
 // allocateCUs marks a range of CUs as allocated in the bitmap.
-func allocateCUs(bitmap *big.Int, start, count int) {
+// Returns an error if the range exceeds the bitmap capacity.
+func allocateCUs(bitmap *big.Int, start, count int) error {
+	if start < 0 || count < 0 || start+count > maxCUBits {
+		return fmt.Errorf("allocateCUs: invalid range [%d, %d) exceeds limit %d", start, start+count, maxCUBits)
+	}
 	for i := start; i < start+count; i++ {
 		bitmap.SetBit(bitmap, i, 1)
 	}
+	return nil
 }
 
 // freeCUs marks a range of CUs as free in the bitmap.
-func freeCUs(bitmap *big.Int, start, count int) {
+// Returns an error if the range exceeds the bitmap capacity.
+func freeCUs(bitmap *big.Int, start, count int) error {
+	if start < 0 || count < 0 || start+count > maxCUBits {
+		return fmt.Errorf("freeCUs: invalid range [%d, %d) exceeds limit %d", start, start+count, maxCUBits)
+	}
 	for i := start; i < start+count; i++ {
 		bitmap.SetBit(bitmap, i, 0)
 	}
+	return nil
 }
 
 // countFreeCUs returns the number of free CUs in the bitmap.
@@ -154,7 +168,10 @@ func tryAllocateCUs(customInfo map[string]any, gpuIndex, requestedCUs int) (mask
 		return "", -1, false
 	}
 
-	allocateCUs(bitmap, start, requestedCUs)
+	if err := allocateCUs(bitmap, start, requestedCUs); err != nil {
+		klog.ErrorS(err, "Failed to allocate CUs", "gpuIndex", gpuIndex)
+		return "", -1, false
+	}
 	mask = buildCUMask(start, requestedCUs)
 
 	klog.InfoS("Allocated CU range",

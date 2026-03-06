@@ -240,7 +240,9 @@ func (dev *AMDDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, 
 				}
 				totalCUs := getTotalCUs(n.CustomInfo)
 				bitmap := getCUBitmap(n.CustomInfo, totalCUs)
-				allocateCUs(bitmap, cuStart.(int), cuCount.(int))
+				if err := allocateCUs(bitmap, cuStart.(int), cuCount.(int)); err != nil {
+					klog.ErrorS(err, "Failed to apply CU allocation", "device", n.ID)
+				}
 				klog.InfoS("Applied CU allocation to device usage",
 					"device", n.ID,
 					"cuStart", cuStart, "cuCount", cuCount,
@@ -357,7 +359,9 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 								if dev.ID == cd.UUID && dev.CustomInfo != nil {
 									totalCUs := getTotalCUs(dev.CustomInfo)
 									bitmap := getCUBitmap(dev.CustomInfo, totalCUs)
-									freeCUs(bitmap, cuStart.(int), cuCount.(int))
+									if err := freeCUs(bitmap, cuStart.(int), cuCount.(int)); err != nil {
+									klog.ErrorS(err, "Failed to free CUs", "device", dev.ID)
+								}
 								}
 							}
 						}
