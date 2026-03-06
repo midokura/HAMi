@@ -122,13 +122,14 @@ func countFreeCUs(bitmap *big.Int, totalCUs int) int {
 }
 
 // buildCUMask generates the ROC_GLOBAL_CU_MASK value for a given CU range.
-// Format: "GPU_INDEX:0xHEX_MASK"
-func buildCUMask(gpuIndex, cuStart, cuCount int) string {
+// Format: hex only, NO GPU prefix (e.g. "0x3FFFFFFFFF").
+// The "GPU_INDEX:0xHEX" format causes parsing bugs on multi-XCD GPUs like MI300X.
+func buildCUMask(cuStart, cuCount int) string {
 	mask := new(big.Int)
 	for i := cuStart; i < cuStart+cuCount; i++ {
 		mask.SetBit(mask, i, 1)
 	}
-	return fmt.Sprintf("%d:0x%s", gpuIndex, strings.ToUpper(mask.Text(16)))
+	return fmt.Sprintf("0x%s", strings.ToUpper(mask.Text(16)))
 }
 
 // tryAllocateCUs attempts to allocate CUs from a device.
@@ -154,7 +155,7 @@ func tryAllocateCUs(customInfo map[string]any, gpuIndex, requestedCUs int) (mask
 	}
 
 	allocateCUs(bitmap, start, requestedCUs)
-	mask = buildCUMask(gpuIndex, start, requestedCUs)
+	mask = buildCUMask(start, requestedCUs)
 
 	klog.InfoS("Allocated CU range",
 		"gpuIndex", gpuIndex,
