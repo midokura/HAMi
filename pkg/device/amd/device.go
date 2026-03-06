@@ -54,9 +54,11 @@ type AMDConfig struct {
 }
 
 func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
-	_, ok := device.SupportDevices[AMDDevice]
-	if !ok {
+	if _, ok := device.SupportDevices[AMDDevice]; !ok {
 		device.SupportDevices[AMDDevice] = "hami.io/amd-devices-allocated"
+	}
+	if _, ok := device.InRequestDevices[AMDDevice]; !ok {
+		device.InRequestDevices[AMDDevice] = "hami.io/amd-devices-allocated"
 	}
 	totalCUs := config.TotalCUs
 	if totalCUs <= 0 {

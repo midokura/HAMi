@@ -802,6 +802,73 @@ func TestEncodeContainerDeviceType(t *testing.T) {
 	}
 }
 
+func TestEncodeDecodeContainerDevicesWithCustomInfo(t *testing.T) {
+	tests := []struct {
+		name string
+		cd   ContainerDevices
+	}{
+		{
+			name: "without CustomInfo (backward compatible)",
+			cd: ContainerDevices{
+				{UUID: "node1-AMDGPU-0", Type: "AMDGPU", Usedmem: 48000, Usedcores: 152},
+			},
+		},
+		{
+			name: "with CU mask CustomInfo",
+			cd: ContainerDevices{
+				{
+					UUID: "node1-AMDGPU-0", Type: "AMDGPU", Usedmem: 48000, Usedcores: 152,
+					CustomInfo: map[string]any{
+						"cu_mask":  "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+						"cu_start": float64(0),
+						"cu_count": float64(152),
+					},
+				},
+			},
+		},
+		{
+			name: "multiple devices with CustomInfo",
+			cd: ContainerDevices{
+				{
+					UUID: "node1-AMDGPU-0", Type: "AMDGPU", Usedmem: 48000, Usedcores: 76,
+					CustomInfo: map[string]any{
+						"cu_mask":  "0xFFFFFFFFFFFFFFFFFFF",
+						"cu_start": float64(0),
+						"cu_count": float64(76),
+					},
+				},
+				{
+					UUID: "node1-AMDGPU-1", Type: "AMDGPU", Usedmem: 96000, Usedcores: 152,
+					CustomInfo: map[string]any{
+						"cu_mask":  "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+						"cu_start": float64(0),
+						"cu_count": float64(152),
+					},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			encoded := EncodeContainerDevices(tt.cd)
+			decoded, err := DecodeContainerDevices(encoded)
+			assert.NilError(t, err)
+			assert.Assert(t, len(tt.cd) == len(decoded), "device count mismatch: want %d, got %d", len(tt.cd), len(decoded))
+			for i, orig := range tt.cd {
+				assert.Assert(t, orig.UUID == decoded[i].UUID)
+				assert.Assert(t, orig.Type == decoded[i].Type)
+				assert.Assert(t, orig.Usedmem == decoded[i].Usedmem)
+				assert.Assert(t, orig.Usedcores == decoded[i].Usedcores)
+				if orig.CustomInfo != nil {
+					assert.Assert(t, decoded[i].CustomInfo != nil, "CustomInfo should not be nil")
+					assert.Assert(t, orig.CustomInfo["cu_mask"] == decoded[i].CustomInfo["cu_mask"],
+						"cu_mask mismatch: want %v, got %v", orig.CustomInfo["cu_mask"], decoded[i].CustomInfo["cu_mask"])
+				}
+			}
+		})
+	}
+}
+
 func TestCheckUUID(t *testing.T) {
 	GPUUseUUID := "hami.io/gpu-use-uuid"
 	GPUNoUseUUID := "hami.io/gpu-no-use-uuid"
