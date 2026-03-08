@@ -476,11 +476,11 @@ func TestGetCUBitmap_ReturnsExisting(t *testing.T) {
 
 // --- getTotalCUs tests ---
 
-func TestGetTotalCUs_Default(t *testing.T) {
+func TestGetTotalCUs_Unconfigured(t *testing.T) {
 	customInfo := map[string]any{}
 	got := getTotalCUs(customInfo)
-	if got != DefaultTotalCUs {
-		t.Errorf("getTotalCUs() = %d, want %d", got, DefaultTotalCUs)
+	if got != 0 {
+		t.Errorf("getTotalCUs() = %d, want 0 (unconfigured)", got)
 	}
 }
 

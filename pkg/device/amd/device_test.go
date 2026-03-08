@@ -28,6 +28,12 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
+// Test constants — GPU specs are configurable, these are just for test fixtures.
+const (
+	testTotalCUs    = 304
+	testTotalMemMB  = 192000
+)
+
 func Test_MutateAdmission(t *testing.T) {
 	tests := []struct {
 		name string
@@ -113,12 +119,12 @@ func Test_GetNodeDevices(t *testing.T) {
 					Index:        uint(0),
 					ID:           "test-AMDGPU-0",
 					Count:        int32(100),
-					Devmem:       int32(Mi300xMemory),
-					Devcore:      int32(DefaultTotalCUs),
+					Devmem:       int32(testTotalMemMB),
+					Devcore:      int32(testTotalCUs),
 					Type:         AMDDevice,
 					Numa:         0,
 					Health:       true,
-					CustomInfo:   map[string]any{CUTotalKey: DefaultTotalCUs},
+					CustomInfo:   map[string]any{CUTotalKey: testTotalCUs},
 					DeviceVendor: AMDCommonWord,
 				},
 			},
@@ -128,6 +134,8 @@ func Test_GetNodeDevices(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			config := AMDConfig{
 				ResourceCountName: "amd.com/gpu",
+				TotalCUs:          testTotalCUs,
+				TotalMemoryMB:     testTotalMemMB,
 			}
 			dev := InitAMDGPUDevice(config)
 			result, _ := dev.GetNodeDevices(test.args)
@@ -286,16 +294,101 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			want: device.ContainerDeviceRequest{
 				Nums:             int32(1),
 				Type:             AMDDevice,
-				Memreq:           int32(Mi300xMemory),
+				Memreq:           int32(testTotalMemMB),
 				MemPercentagereq: int32(0),
 				Coresreq:         int32(0),
+			},
+		},
+		{
+			name: "gpumem only",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"amd.com/gpu":    resource.MustParse("1"),
+						"amd.com/gpumem": resource.MustParse("48000"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(1),
+				Type:             AMDDevice,
+				Memreq:           int32(48000),
+				MemPercentagereq: int32(0),
+				Coresreq:         int32(0),
+			},
+		},
+		{
+			name: "gpucores only",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"amd.com/gpu":      resource.MustParse("1"),
+						"amd.com/gpucores": resource.MustParse("152"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(1),
+				Type:             AMDDevice,
+				Memreq:           int32(testTotalMemMB),
+				MemPercentagereq: int32(0),
+				Coresreq:         int32(152),
+			},
+		},
+		{
+			name: "gpumem and gpucores",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"amd.com/gpu":      resource.MustParse("1"),
+						"amd.com/gpumem":   resource.MustParse("48000"),
+						"amd.com/gpucores": resource.MustParse("152"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(1),
+				Type:             AMDDevice,
+				Memreq:           int32(48000),
+				MemPercentagereq: int32(0),
+				Coresreq:         int32(152),
+			},
+		},
+		{
+			name: "config without resource names ignores gpumem and gpucores",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"amd.com/gpu":      resource.MustParse("1"),
+						"amd.com/gpumem":   resource.MustParse("48000"),
+						"amd.com/gpucores": resource.MustParse("152"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(1),
+				Type:             AMDDevice,
+				Memreq:           int32(0), // no totalMemoryMB configured → 0
+				MemPercentagereq: int32(0),
+				Coresreq:         int32(0), // no resourceCoreName → 0
 			},
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			config := AMDConfig{
-				ResourceCountName: "amd.com/gpu",
+				ResourceCountName:  "amd.com/gpu",
+				ResourceMemoryName: "amd.com/gpumem",
+				ResourceCoreName:   "amd.com/gpucores",
+				TotalCUs:           testTotalCUs,
+				TotalMemoryMB:      testTotalMemMB,
+			}
+			// Last test case uses empty config to verify unconfigured scenario
+			if test.name == "config without resource names ignores gpumem and gpucores" {
+				config = AMDConfig{
+					ResourceCountName: "amd.com/gpu",
+					// No ResourceMemoryName, ResourceCoreName, TotalCUs, TotalMemoryMB
+				}
 			}
 			dev := InitAMDGPUDevice(config)
 			result := dev.GenerateResourceRequests(test.args)
@@ -306,7 +399,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 
 func TestDevices_Fit(t *testing.T) {
 	config := AMDConfig{
-		ResourceCountName: "amd.com/gpu",
+		ResourceCountName:  "amd.com/gpu",
+		ResourceMemoryName: "amd.com/gpumem",
+		ResourceCoreName:   "amd.com/gpucores",
+		TotalCUs:           testTotalCUs,
+		TotalMemoryMB:      testTotalMemMB,
 	}
 	dev := InitAMDGPUDevice(config)
 
@@ -380,7 +477,7 @@ func TestDevices_Fit(t *testing.T) {
 					Numa:       0,
 					Type:       AMDDevice,
 					Health:     true,
-					CustomInfo: map[string]any{},
+					CustomInfo: map[string]any{CUTotalKey: testTotalCUs},
 				},
 				{
 					ID:         "dev-1",
@@ -394,7 +491,7 @@ func TestDevices_Fit(t *testing.T) {
 					Numa:       0,
 					Type:       AMDDevice,
 					Health:     true,
-					CustomInfo: map[string]any{},
+					CustomInfo: map[string]any{CUTotalKey: testTotalCUs},
 				},
 			},
 			request: device.ContainerDeviceRequest{
@@ -424,7 +521,7 @@ func TestDevices_Fit(t *testing.T) {
 				Numa:       0,
 				Health:     true,
 				Type:       AMDDevice,
-				CustomInfo: map[string]any{},
+				CustomInfo: map[string]any{CUTotalKey: testTotalCUs},
 			}},
 			request: device.ContainerDeviceRequest{
 				Nums:             1,
@@ -453,7 +550,7 @@ func TestDevices_Fit(t *testing.T) {
 				Numa:       0,
 				Type:       AMDDevice,
 				Health:     true,
-				CustomInfo: map[string]any{},
+				CustomInfo: map[string]any{CUTotalKey: testTotalCUs},
 			}},
 			request: device.ContainerDeviceRequest{
 				Nums:             1,
@@ -482,7 +579,7 @@ func TestDevices_Fit(t *testing.T) {
 				Numa:       0,
 				Type:       AMDDevice,
 				Health:     true,
-				CustomInfo: map[string]any{},
+				CustomInfo: map[string]any{CUTotalKey: testTotalCUs},
 			}},
 			request: device.ContainerDeviceRequest{
 				Nums:             1,
@@ -505,8 +602,8 @@ func TestDevices_Fit(t *testing.T) {
 				Used:       0,
 				Count:      100,
 				Usedmem:    0,
-				Totalmem:   Mi300xMemory,
-				Totalcore:  int32(DefaultTotalCUs),
+				Totalmem:   testTotalMemMB,
+				Totalcore:  int32(testTotalCUs),
 				Usedcores:  0,
 				Numa:       0,
 				Type:       AMDDevice,

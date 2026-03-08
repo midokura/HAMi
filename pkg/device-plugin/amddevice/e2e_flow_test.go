@@ -34,11 +34,19 @@ import (
 //  3. Scheduler Fit() allocates CUs and generates CustomInfo
 //  4. PatchAnnotations encodes the allocation into pod annotations
 //  5. Device Plugin decodes annotations and generates env vars
+// Test constants for GPU specs (configurable, not hardcoded in production)
+const (
+	testTotalCUs   = 304
+	testTotalMemMB = 192000
+)
+
 func TestE2EFlow_FitToEnvVars(t *testing.T) {
 	amdDev := amd.InitAMDGPUDevice(amd.AMDConfig{
 		ResourceCountName:  "amd.com/gpu",
 		ResourceMemoryName: "amd.com/gpumem",
 		ResourceCoreName:   "amd.com/gpucores",
+		TotalCUs:           testTotalCUs,
+		TotalMemoryMB:      int32(testTotalMemMB),
 	})
 
 	tests := []struct {
@@ -90,16 +98,16 @@ func TestE2EFlow_FitToEnvVars(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Step 1: Create device inventory (simulating one MI300X GPU)
 			customInfo := make(map[string]any)
-			customInfo["cu_total"] = amd.DefaultTotalCUs
+			customInfo["cu_total"] = testTotalCUs
 			devices := []*device.DeviceUsage{
 				{
 					ID:        "phoenix-AMDGPU-0",
 					Index:     0,
 					Count:     100,
 					Used:      0,
-					Totalmem:  amd.Mi300xMemory,
+					Totalmem:  int32(testTotalMemMB),
 					Usedmem:   0,
-					Totalcore: int32(amd.DefaultTotalCUs),
+					Totalcore: int32(testTotalCUs),
 					Usedcores: 0,
 					Type:      amd.AMDDevice,
 					Health:    true,
@@ -200,15 +208,17 @@ func TestE2EFlow_MultiTenantCUExclusion(t *testing.T) {
 		ResourceCountName:  "amd.com/gpu",
 		ResourceMemoryName: "amd.com/gpumem",
 		ResourceCoreName:   "amd.com/gpucores",
+		TotalCUs:           testTotalCUs,
+		TotalMemoryMB:      int32(testTotalMemMB),
 	})
 
 	// Shared device inventory
 	customInfo := make(map[string]any)
-	customInfo["cu_total"] = amd.DefaultTotalCUs
+	customInfo["cu_total"] = testTotalCUs
 	devices := []*device.DeviceUsage{
 		{
 			ID: "phoenix-AMDGPU-0", Index: 0, Count: 100,
-			Totalmem: amd.Mi300xMemory, Totalcore: int32(amd.DefaultTotalCUs),
+			Totalmem: int32(testTotalMemMB), Totalcore: int32(testTotalCUs),
 			Type: amd.AMDDevice, Health: true, CustomInfo: customInfo,
 		},
 	}

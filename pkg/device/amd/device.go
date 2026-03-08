@@ -44,8 +44,6 @@ const (
 	AMDUseUUID         = "amd.com/use-gpu-uuid"
 	AMDNoUseUUID       = "amd.com/nouse-gpu-uuid"
 	AMDAssignedNode    = "amd.com/predicate-node"
-	Mi300xMemory       = 192000
-	DefaultTotalCUs    = 304 // MI300X default
 )
 
 type AMDConfig struct {
@@ -65,11 +63,13 @@ func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
 	}
 	totalCUs := config.TotalCUs
 	if totalCUs <= 0 {
-		totalCUs = DefaultTotalCUs
+		klog.Warning("AMD GPU: totalCUs not configured. GPU partitioning (gpucores) will be disabled. " +
+			"Set totalCUs in scheduler config, or implement rocminfo auto-detection in Device Plugin.")
 	}
 	totalMemoryMB := config.TotalMemoryMB
 	if totalMemoryMB <= 0 {
-		totalMemoryMB = Mi300xMemory
+		klog.Warning("AMD GPU: totalMemoryMB not configured. GPU memory limiting (gpumem) will be disabled. " +
+			"Set totalMemoryMB in scheduler config, or implement rocminfo auto-detection in Device Plugin.")
 	}
 	dev := &AMDDevices{
 		resourceCountName:  config.ResourceCountName,

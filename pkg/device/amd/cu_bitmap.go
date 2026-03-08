@@ -59,6 +59,7 @@ func getCUBitmap(customInfo map[string]any, totalCUs int) *big.Int {
 }
 
 // getTotalCUs returns the total CU count for a device.
+// Returns 0 if not configured (GPU partitioning disabled).
 func getTotalCUs(customInfo map[string]any) int {
 	if v, ok := customInfo[CUTotalKey]; ok {
 		switch t := v.(type) {
@@ -70,7 +71,7 @@ func getTotalCUs(customInfo map[string]any) int {
 			return int(t)
 		}
 	}
-	return DefaultTotalCUs
+	return 0
 }
 
 // findFreeCURange finds a contiguous range of `count` free CUs in the bitmap.
