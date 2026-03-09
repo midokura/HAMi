@@ -41,6 +41,7 @@ import (
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/amd"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -702,6 +703,32 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		"podName", args.Pod.Name,
 		"nodeID", m.NodeID,
 		"devices", m.Devices)
+	// Log per-container GPU allocation details (CU mask, memory) for k9s visibility
+	for devType, psd := range m.Devices {
+		for ctrIdx, cds := range psd {
+			for _, cd := range cds {
+				cuMask := ""
+				cuCount := 0
+				if cd.CustomInfo != nil {
+					if v, ok := cd.CustomInfo[amd.CUMaskKey]; ok {
+						cuMask, _ = v.(string)
+					}
+					if v, ok := cd.CustomInfo[amd.CUCountKey]; ok {
+						cuCount, _ = v.(int)
+					}
+				}
+				klog.InfoS("GPU allocation",
+					"pod", klog.KRef(args.Pod.Namespace, args.Pod.Name),
+					"container", ctrIdx,
+					"deviceType", devType,
+					"uuid", cd.UUID,
+					"memoryMB", cd.Usedmem,
+					"cuMask", cuMask,
+					"cuCount", cuCount,
+				)
+			}
+		}
+	}
 	annotations := make(map[string]string)
 	annotations[util.AssignedNodeAnnotations] = m.NodeID
 	annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)

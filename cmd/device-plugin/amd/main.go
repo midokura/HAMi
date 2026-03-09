@@ -29,6 +29,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/amddevice"
 	"github.com/Project-HAMi/HAMi/pkg/device/amd"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
@@ -52,6 +53,10 @@ func main() {
 		ResourceCoreName:   "amd.com/gpucores",
 	})
 
+	// Set util.NodeName so registration can use it
+	util.NodeName = os.Getenv(util.NodeNameEnvName)
+	klog.Infof("AMD device plugin working on node %s", util.NodeName)
+
 	// Initialize Kubernetes client
 	client.InitGlobalClient()
 
@@ -69,6 +74,9 @@ func main() {
 		klog.Fatalf("Failed to start AMD device plugin: %v", err)
 	}
 	defer plugin.Stop()
+
+	// Start GPU auto-detection and node annotation registration
+	go plugin.WatchAndRegister()
 
 	// Handle OS signals for graceful shutdown
 	sigs := make(chan os.Signal, 1)

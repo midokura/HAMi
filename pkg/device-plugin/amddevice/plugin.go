@@ -50,8 +50,9 @@ type AMDDevicePlugin struct {
 	socket       string
 	logLevel     string
 
-	server *grpc.Server
-	stop   chan struct{}
+	server      *grpc.Server
+	stop        chan struct{}
+	deviceCache string // cached encoded device info to avoid redundant annotation patches
 }
 
 // NewAMDDevicePlugin creates a new AMD device plugin instance.

@@ -17,6 +17,7 @@ limitations under the License.
 package amd
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"strings"
@@ -44,6 +45,7 @@ const (
 	AMDUseUUID         = "amd.com/use-gpu-uuid"
 	AMDNoUseUUID       = "amd.com/nouse-gpu-uuid"
 	AMDAssignedNode    = "amd.com/predicate-node"
+	RegisterAnnos      = "hami.io/node-amd-register"
 )
 
 type AMDConfig struct {
@@ -102,6 +104,35 @@ func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 }
 
 func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
+	// First try reading from node annotation written by the device plugin (rocminfo auto-detection).
+	devEncoded, ok := n.Annotations[RegisterAnnos]
+	if ok && devEncoded != "" {
+		nodedevices, err := device.UnMarshalNodeDevices(devEncoded)
+		if err != nil {
+			klog.ErrorS(err, "failed to decode AMD node devices from annotation", "node", n.Name, "annotation", devEncoded)
+			return []*device.DeviceInfo{}, err
+		}
+		if len(nodedevices) == 0 {
+			return []*device.DeviceInfo{}, errors.New("no AMD GPU found in node annotation")
+		}
+		// Enrich with CustomInfo (CUTotalKey for bitmap partitioning) and DeviceVendor
+		for _, nd := range nodedevices {
+			nd.DeviceVendor = dev.CommonWord()
+			if nd.CustomInfo == nil {
+				nd.CustomInfo = make(map[string]any)
+			}
+			nd.CustomInfo[CUTotalKey] = int(nd.Devcore)
+		}
+		for _, nd := range nodedevices {
+			klog.InfoS("AMD nodedevice from annotation",
+				"id", nd.ID, "totalCUs", nd.Devcore, "mem", nd.Devmem,
+				"virtualDevices", nd.Count, "type", nd.Type)
+		}
+		return nodedevices, nil
+	}
+
+	// Fallback: annotation not present, use hardcoded config values.
+	klog.InfoS("AMD RegisterAnnos not found, falling back to config-based device info", "node", n.Name)
 	nodedevices := []*device.DeviceInfo{}
 
 	// The kubelet capacity (amd.com/gpu) reports the number of VIRTUAL devices
@@ -114,9 +145,7 @@ func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 		return []*device.DeviceInfo{}, fmt.Errorf("device not found %s", dev.resourceCountName)
 	}
 
-	// TODO: Auto-detect physical GPU count from node annotation (like NVIDIA).
-	// For now, assume 1 physical GPU per node. The device plugin should write
-	// the physical count to a node annotation in the future.
+	// Fallback: assume 1 physical GPU per node with config values.
 	physicalGPUs := 1
 
 	// Each physical GPU gets one DeviceInfo with:
@@ -139,7 +168,7 @@ func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 		})
 	}
 	for _, nd := range nodedevices {
-		klog.InfoS("Registered AMD nodedevice",
+		klog.InfoS("Registered AMD nodedevice (fallback)",
 			"id", nd.ID, "totalCUs", dev.totalCUs, "mem", nd.Devmem,
 			"virtualDevices", nd.Count)
 	}
