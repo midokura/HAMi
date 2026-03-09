@@ -1,0 +1,8 @@
+FROM golang:1.25.5-bookworm AS gobuild
+ADD . /k8s-vgpu
+RUN cd /k8s-vgpu && go build -ldflags '-s -w' -o bin/amd-device-plugin ./cmd/device-plugin/amd
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=gobuild /k8s-vgpu/bin/amd-device-plugin /usr/local/bin/amd-device-plugin
+ENTRYPOINT ["amd-device-plugin"]
