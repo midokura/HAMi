@@ -510,9 +510,19 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 							deviceID = strings.Split(deviceID, "[")[0]
 						}
 						if d.Device.ID == deviceID {
-							d.Device.Used++
-							d.Device.Usedmem += udevice.Usedmem
-							d.Device.Usedcores += udevice.Usedcores
+							// Use device-type-specific AddResourceUsage to rebuild
+							// all usage state (including CU bitmaps for AMD).
+							if devHandler, ok := device.DevicesMap[udevice.Type]; ok {
+								if err := devHandler.AddResourceUsage(nil, d.Device, &udevice); err != nil {
+									klog.ErrorS(err, "AddResourceUsage failed during usage rebuild",
+										"device", deviceID, "type", udevice.Type)
+								}
+							} else {
+								// Fallback for unknown device types
+								d.Device.Used++
+								d.Device.Usedmem += udevice.Usedmem
+								d.Device.Usedcores += udevice.Usedcores
+							}
 							d.Device.PodInfos = append(d.Device.PodInfos, p)
 
 							if strings.Contains(udevice.UUID, "[") {

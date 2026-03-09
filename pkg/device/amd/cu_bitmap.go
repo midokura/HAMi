@@ -44,6 +44,22 @@ const (
 	CUCountKey   = "cu_count"   // int: number of CUs allocated
 )
 
+// toInt converts a value from map[string]any to int.
+// Handles int, int32, int64, float64 (JSON unmarshalling produces float64).
+func toInt(v any) int {
+	switch t := v.(type) {
+	case int:
+		return t
+	case int32:
+		return int(t)
+	case int64:
+		return int(t)
+	case float64:
+		return int(t)
+	}
+	return 0
+}
+
 // getCUBitmap retrieves or initializes the CU bitmap from CustomInfo.
 func getCUBitmap(customInfo map[string]any, totalCUs int) *big.Int {
 	if v, ok := customInfo[CUBitmapKey]; ok {
@@ -62,14 +78,7 @@ func getCUBitmap(customInfo map[string]any, totalCUs int) *big.Int {
 // Returns 0 if not configured (GPU partitioning disabled).
 func getTotalCUs(customInfo map[string]any) int {
 	if v, ok := customInfo[CUTotalKey]; ok {
-		switch t := v.(type) {
-		case int:
-			return t
-		case int32:
-			return int(t)
-		case int64:
-			return int(t)
-		}
+		return toInt(v)
 	}
 	return 0
 }

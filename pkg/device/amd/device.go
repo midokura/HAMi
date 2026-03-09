@@ -103,18 +103,32 @@ func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 
 func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
 	nodedevices := []*device.DeviceInfo{}
-	i := 0
-	counts, ok := n.Status.Capacity.Name(corev1.ResourceName(dev.resourceCountName), resource.DecimalSI).AsInt64()
-	if !ok || counts == 0 {
+
+	// The kubelet capacity (amd.com/gpu) reports the number of VIRTUAL devices
+	// registered by the device plugin (e.g. 10). This is NOT the number of
+	// physical GPUs. For CU bitmap partitioning, we need one DeviceInfo per
+	// PHYSICAL GPU, with Count set to the number of virtual devices (pods)
+	// that can share it.
+	virtualCount, ok := n.Status.Capacity.Name(corev1.ResourceName(dev.resourceCountName), resource.DecimalSI).AsInt64()
+	if !ok || virtualCount == 0 {
 		return []*device.DeviceInfo{}, fmt.Errorf("device not found %s", dev.resourceCountName)
 	}
-	for int64(i) < counts {
+
+	// TODO: Auto-detect physical GPU count from node annotation (like NVIDIA).
+	// For now, assume 1 physical GPU per node. The device plugin should write
+	// the physical count to a node annotation in the future.
+	physicalGPUs := 1
+
+	// Each physical GPU gets one DeviceInfo with:
+	//   Count = virtualCount (max pods that can share this GPU)
+	//   A single CU bitmap shared across all pods on this GPU
+	for i := 0; i < physicalGPUs; i++ {
 		customInfo := make(map[string]any)
 		customInfo[CUTotalKey] = dev.totalCUs
 		nodedevices = append(nodedevices, &device.DeviceInfo{
 			Index:        uint(i),
 			ID:           n.Name + "-" + AMDDevice + "-" + fmt.Sprint(i),
-			Count:        100, // Allow multiple pods to share one GPU via CU partitioning
+			Count:        int32(virtualCount), // Virtual devices per physical GPU
 			Devmem:       dev.totalMemoryMB,
 			Devcore:      int32(dev.totalCUs),
 			Type:         AMDDevice,
@@ -123,11 +137,11 @@ func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 			CustomInfo:   customInfo,
 			DeviceVendor: AMDCommonWord,
 		})
-		i++
 	}
 	for _, nd := range nodedevices {
-		klog.V(4).InfoS("Registered AMD nodedevice",
-			"id", nd.ID, "totalCUs", dev.totalCUs, "mem", nd.Devmem)
+		klog.InfoS("Registered AMD nodedevice",
+			"id", nd.ID, "totalCUs", dev.totalCUs, "mem", nd.Devmem,
+			"virtualDevices", nd.Count)
 	}
 	return nodedevices, nil
 }
@@ -233,14 +247,16 @@ func (dev *AMDDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, 
 
 	// Apply CU allocation to device bitmap
 	if ctr.CustomInfo != nil {
-		if cuStart, ok := ctr.CustomInfo[CUStartKey]; ok {
-			if cuCount, ok := ctr.CustomInfo[CUCountKey]; ok {
+		if cuStartRaw, ok := ctr.CustomInfo[CUStartKey]; ok {
+			if cuCountRaw, ok := ctr.CustomInfo[CUCountKey]; ok {
 				if n.CustomInfo == nil {
 					n.CustomInfo = make(map[string]any)
 				}
+				cuStart := toInt(cuStartRaw)
+				cuCount := toInt(cuCountRaw)
 				totalCUs := getTotalCUs(n.CustomInfo)
 				bitmap := getCUBitmap(n.CustomInfo, totalCUs)
-				if err := allocateCUs(bitmap, cuStart.(int), cuCount.(int)); err != nil {
+				if err := allocateCUs(bitmap, cuStart, cuCount); err != nil {
 					klog.ErrorS(err, "Failed to apply CU allocation", "device", n.ID)
 				}
 				klog.InfoS("Applied CU allocation to device usage",
