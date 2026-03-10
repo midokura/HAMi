@@ -34,6 +34,7 @@ import (
 const (
 	// maxCUBits is the maximum number of CU bits supported in the bitmap.
 	// This is a safety limit to prevent unbounded bit manipulation.
+	// Maximum CU bits to track. MI300X has 304 CUs; 1024 provides margin for future GPUs.
 	maxCUBits = 1024
 
 	// CustomInfo keys
@@ -93,7 +94,7 @@ func findFreeCURange(bitmap *big.Int, totalCUs, count int) int {
 	consecutive := 0
 	start := 0
 
-	for i := 0; i < totalCUs; i++ {
+	for i := range totalCUs {
 		if bitmap.Bit(i) == 0 {
 			if consecutive == 0 {
 				start = i
@@ -137,7 +138,7 @@ func freeCUs(bitmap *big.Int, start, count int) error {
 // countFreeCUs returns the number of free CUs in the bitmap.
 func countFreeCUs(bitmap *big.Int, totalCUs int) int {
 	free := 0
-	for i := 0; i < totalCUs; i++ {
+	for i := range totalCUs {
 		if bitmap.Bit(i) == 0 {
 			free++
 		}

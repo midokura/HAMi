@@ -125,7 +125,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					Numa:         0,
 					Health:       true,
 					CustomInfo:   map[string]any{CUTotalKey: testTotalCUs},
-					DeviceVendor: AMDCommonWord,
+					DeviceVendor: AMDDevice,
 				},
 			},
 		},
@@ -218,57 +218,25 @@ func Test_PatchAnnotations(t *testing.T) {
 func Test_checkType(t *testing.T) {
 	tests := []struct {
 		name string
-		args struct {
-			annos map[string]string
-			d     device.DeviceUsage
-			n     device.ContainerDeviceRequest
-		}
-		want1 bool
-		want2 bool
-		want3 bool
+		req  device.ContainerDeviceRequest
+		want bool
 	}{
 		{
 			name: "the same type",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-				n     device.ContainerDeviceRequest
-			}{
-				annos: map[string]string{},
-				d:     device.DeviceUsage{},
-				n: device.ContainerDeviceRequest{
-					Type: AMDDevice,
-				},
-			},
-			want1: true,
-			want2: true,
-			want3: false,
+			req:  device.ContainerDeviceRequest{Type: AMDDevice},
+			want: true,
 		},
 		{
 			name: "the different type",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-				n     device.ContainerDeviceRequest
-			}{
-				annos: map[string]string{},
-				d:     device.DeviceUsage{},
-				n: device.ContainerDeviceRequest{
-					Type: "test111",
-				},
-			},
-			want1: false,
-			want2: false,
-			want3: false,
+			req:  device.ContainerDeviceRequest{Type: "test111"},
+			want: false,
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := AMDDevices{}
-			result1, result2, result3 := dev.checkType(test.args.n)
-			assert.Equal(t, result1, test.want1)
-			assert.Equal(t, result2, test.want2)
-			assert.Equal(t, result3, test.want3)
+			result := dev.checkType(test.req)
+			assert.Equal(t, test.want, result)
 		})
 	}
 }

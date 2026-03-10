@@ -40,7 +40,6 @@ type AMDDevices struct {
 
 const (
 	AMDDevice          = "AMDGPU"
-	AMDCommonWord      = "AMDGPU"
 	AMDDeviceSelection = "amd.com/gpu-index"
 	AMDUseUUID         = "amd.com/use-gpu-uuid"
 	AMDNoUseUUID       = "amd.com/nouse-gpu-uuid"
@@ -88,7 +87,7 @@ func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
 }
 
 func (dev *AMDDevices) CommonWord() string {
-	return AMDCommonWord
+	return AMDDevice
 }
 
 func ParseConfig(fs *flag.FlagSet) {
@@ -164,7 +163,7 @@ func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 			Numa:         0,
 			Health:       true,
 			CustomInfo:   customInfo,
-			DeviceVendor: AMDCommonWord,
+			DeviceVendor: AMDDevice,
 		})
 	}
 	for _, nd := range nodedevices {
@@ -196,11 +195,8 @@ func (dev *AMDDevices) NodeCleanUp(nn string) error {
 	return nil
 }
 
-func (dev *AMDDevices) checkType(n device.ContainerDeviceRequest) (bool, bool, bool) {
-	if strings.Compare(n.Type, AMDDevice) == 0 {
-		return true, true, false
-	}
-	return false, false, false
+func (dev *AMDDevices) checkType(n device.ContainerDeviceRequest) bool {
+	return strings.Compare(n.Type, AMDDevice) == 0
 }
 
 func (dev *AMDDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
@@ -313,12 +309,7 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 		dev := devices[i]
 
 		// Type check
-		if !strings.Contains(dev.Type, k.Type) {
-			reason[common.CardTypeMismatch]++
-			continue
-		}
-		_, found, _ := amddevice.checkType(k)
-		if !found {
+		if !amddevice.checkType(k) {
 			reason[common.CardTypeMismatch]++
 			continue
 		}

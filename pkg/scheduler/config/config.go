@@ -202,10 +202,10 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return awsneuron.InitAWSNeuronDevice(awsneuronConfig), nil
 		}, config.AWSNeuronConfig},
-		{amd.AMDDevice, amd.AMDCommonWord, func(cfg any) (device.Devices, error) {
+		{amd.AMDDevice, amd.AMDDevice, func(cfg any) (device.Devices, error) {
 			amdGPUConfig, ok := cfg.(amd.AMDConfig)
 			if !ok {
-				return nil, fmt.Errorf("invalid configuration for %s", amd.AMDCommonWord)
+				return nil, fmt.Errorf("invalid configuration for %s", amd.AMDDevice)
 			}
 			return amd.InitAMDGPUDevice(amdGPUConfig), nil
 		}, config.AMDGPUConfig},
