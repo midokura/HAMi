@@ -110,7 +110,7 @@ func Test_GetNodeDevices(t *testing.T) {
 				},
 				Status: corev1.NodeStatus{
 					Capacity: corev1.ResourceList{
-						"amd.com/gpu": *resource.NewQuantity(1, resource.DecimalSI),
+						"amd.com/gpu": *resource.NewQuantity(100, resource.DecimalSI),
 					},
 				},
 			},
