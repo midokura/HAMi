@@ -34,6 +34,7 @@ import (
 //  3. Scheduler Fit() allocates CUs and generates CustomInfo
 //  4. PatchAnnotations encodes the allocation into pod annotations
 //  5. Device Plugin decodes annotations and generates env vars
+//
 // Test constants for GPU specs (configurable, not hardcoded in production)
 const (
 	testTotalCUs   = 304
@@ -101,16 +102,16 @@ func TestE2EFlow_FitToEnvVars(t *testing.T) {
 			customInfo["cu_total"] = testTotalCUs
 			devices := []*device.DeviceUsage{
 				{
-					ID:        "phoenix-AMDGPU-0",
-					Index:     0,
-					Count:     100,
-					Used:      0,
-					Totalmem:  int32(testTotalMemMB),
-					Usedmem:   0,
-					Totalcore: int32(testTotalCUs),
-					Usedcores: 0,
-					Type:      amd.AMDDevice,
-					Health:    true,
+					ID:         "phoenix-AMDGPU-0",
+					Index:      0,
+					Count:      100,
+					Used:       0,
+					Totalmem:   int32(testTotalMemMB),
+					Usedmem:    0,
+					Totalcore:  int32(testTotalCUs),
+					Usedcores:  0,
+					Type:       amd.AMDDevice,
+					Health:     true,
 					CustomInfo: customInfo,
 				},
 			}

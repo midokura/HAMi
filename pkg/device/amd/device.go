@@ -99,7 +99,7 @@ func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 	if !ok {
 		_, ok = ctr.Resources.Limits[corev1.ResourceName(dev.resourceMemoryName)]
 	}
-	klog.Infoln("MutateAdmsssion result", ok)
+	klog.Infoln("MutateAdmission result", ok)
 	return ok, nil
 }
 
@@ -151,7 +151,7 @@ func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 	// Each physical GPU gets one DeviceInfo with:
 	//   Count = virtualCount (max pods that can share this GPU)
 	//   A single CU bitmap shared across all pods on this GPU
-	for i := 0; i < physicalGPUs; i++ {
+	for i := range physicalGPUs {
 		customInfo := make(map[string]any)
 		customInfo[CUTotalKey] = dev.totalCUs
 		nodedevices = append(nodedevices, &device.DeviceInfo{
@@ -405,8 +405,8 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 									totalCUs := getTotalCUs(dev.CustomInfo)
 									bitmap := getCUBitmap(dev.CustomInfo, totalCUs)
 									if err := freeCUs(bitmap, cuStart.(int), cuCount.(int)); err != nil {
-									klog.ErrorS(err, "Failed to free CUs", "device", dev.ID)
-								}
+										klog.ErrorS(err, "Failed to free CUs", "device", dev.ID)
+									}
 								}
 							}
 						}

@@ -37,11 +37,11 @@ const (
 	maxCUBits = 1024
 
 	// CustomInfo keys
-	CUBitmapKey  = "cu_bitmap"  // *big.Int stored in DeviceUsage.CustomInfo
-	CUTotalKey   = "cu_total"   // int: total CUs on this device
-	CUMaskKey    = "cu_mask"    // string: ROC_GLOBAL_CU_MASK value in ContainerDevice.CustomInfo
-	CUStartKey   = "cu_start"   // int: start CU index (for debugging/logging)
-	CUCountKey   = "cu_count"   // int: number of CUs allocated
+	CUBitmapKey = "cu_bitmap" // *big.Int stored in DeviceUsage.CustomInfo
+	CUTotalKey  = "cu_total"  // int: total CUs on this device
+	CUMaskKey   = "cu_mask"   // string: ROC_GLOBAL_CU_MASK value in ContainerDevice.CustomInfo
+	CUStartKey  = "cu_start"  // int: start CU index (for debugging/logging)
+	CUCountKey  = "cu_count"  // int: number of CUs allocated
 )
 
 // toInt converts a value from map[string]any to int.

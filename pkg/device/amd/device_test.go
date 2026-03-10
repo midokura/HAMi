@@ -30,8 +30,8 @@ import (
 
 // Test constants — GPU specs are configurable, these are just for test fixtures.
 const (
-	testTotalCUs    = 304
-	testTotalMemMB  = 192000
+	testTotalCUs   = 304
+	testTotalMemMB = 192000
 )
 
 func Test_MutateAdmission(t *testing.T) {
@@ -597,17 +597,17 @@ func TestDevices_Fit(t *testing.T) {
 		{
 			name: "fit fail: insufficient CUs",
 			devices: []*device.DeviceUsage{{
-				ID:         "dev-0",
-				Index:      0,
-				Used:       0,
-				Count:      100,
-				Usedmem:    0,
-				Totalmem:   testTotalMemMB,
-				Totalcore:  int32(testTotalCUs),
-				Usedcores:  0,
-				Numa:       0,
-				Type:       AMDDevice,
-				Health:     true,
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  testTotalMemMB,
+				Totalcore: int32(testTotalCUs),
+				Usedcores: 0,
+				Numa:      0,
+				Type:      AMDDevice,
+				Health:    true,
 				CustomInfo: map[string]any{
 					CUTotalKey: 4, // Only 4 CUs total
 				},
