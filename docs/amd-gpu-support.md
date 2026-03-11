@@ -19,7 +19,7 @@
 
 ## Enabling AMD GPU-sharing Support
 
-### 1. Deploy HAMi
+### 1. Deploy HAMi scheduler
 
 Label your AMD GPU nodes for scheduling:
 
@@ -27,9 +27,10 @@ Label your AMD GPU nodes for scheduling:
 kubectl label nodes {nodeid} gpu=on
 ```
 
-Deploy HAMi:
+Deploy HAMi using Helm. The scheduler includes AMD GPU support by default:
 
 ```
+helm repo add hami-charts https://project-hami.github.io/HAMi/
 helm install hami hami-charts/hami -n kube-system
 ```
 
@@ -41,17 +42,11 @@ Customize your installation by adjusting the [configs](config.md). The default A
 | `resourceMemoryName` | `amd.com/gpumem` |
 | `resourceCoreName` | `amd.com/gpucores` |
 
-### 2. Deploy AMD device plugin
+### 2. Build libamvgpu.so
 
-The AMD device plugin must be deployed separately on each GPU node. It detects GPU specifications (CU count, VRAM size) via `rocminfo` and registers them as node annotations.
-
-Build and deploy the device plugin:
+`libamvgpu.so` is the AMD GPU memory virtualization library. It must be built and placed on each GPU node.
 
 ```bash
-# Build the device plugin image
-docker build -f docker/Dockerfile.amd-device-plugin -t hami-amd-device-plugin:latest .
-
-# Build libamvgpu.so (memory virtualization library)
 cd libvgpu
 docker build -f Dockerfile.hip -t libamvgpu-builder .
 docker run --rm -v $(pwd)/dist:/dist libamvgpu-builder
@@ -59,20 +54,33 @@ sudo mkdir -p /opt/hami
 sudo cp dist/libamvgpu.so /opt/hami/
 ```
 
-Deploy the device plugin DaemonSet:
+### 3. Deploy AMD device plugin
+
+The AMD device plugin runs on each GPU node. It detects GPU specifications (CU count, VRAM size) via `rocminfo` and registers them as node annotations.
 
 ```bash
+# Build the device plugin image
+docker build -f docker/Dockerfile.amd-device-plugin -t hami-amd-device-plugin:latest .
+
+# Deploy the DaemonSet
 kubectl apply -f deployments/device-plugin.yaml
 ```
 
-### 3. Verify
+### 4. Verify
 
 ```
 kubectl get pods -n kube-system
+```
+
+Verify that `hami-scheduler` and `hami-amd-device-plugin` pods are in the *Running* state.
+
+Check that GPUs are detected:
+
+```
 kubectl get node -o yaml | grep -A5 "hami.io/node-amd-register"
 ```
 
-If `hami-amd-device-plugin` pods are in the *Running* state and node annotations show GPU information, your installation is successful.
+If node annotations show GPU information (CU count, VRAM), your installation is successful.
 
 ## Running AMD GPU jobs
 
