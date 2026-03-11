@@ -85,30 +85,32 @@ func getTotalCUs(customInfo map[string]any) int {
 }
 
 // findFreeCURange finds a contiguous range of `count` free CUs in the bitmap.
-// Returns the start index, or -1 if no contiguous range is available.
-func findFreeCURange(bitmap *big.Int, totalCUs, count int) int {
+// Returns the start index (or -1 if unavailable) and the total number of free CUs.
+func findFreeCURange(bitmap *big.Int, totalCUs, count int) (start int, freeCount int) {
 	if count <= 0 || count > totalCUs {
-		return -1
+		return -1, 0
 	}
 
 	consecutive := 0
-	start := 0
+	rangeStart := 0
+	foundStart := -1
 
 	for i := range totalCUs {
 		if bitmap.Bit(i) == 0 {
+			freeCount++
 			if consecutive == 0 {
-				start = i
+				rangeStart = i
 			}
 			consecutive++
-			if consecutive >= count {
-				return start
+			if consecutive >= count && foundStart < 0 {
+				foundStart = rangeStart
 			}
 		} else {
 			consecutive = 0
 		}
 	}
 
-	return -1
+	return foundStart, freeCount
 }
 
 // allocateCUs marks a range of CUs as allocated in the bitmap.
@@ -168,9 +170,8 @@ func tryAllocateCUs(customInfo map[string]any, gpuIndex, requestedCUs int) (mask
 		requestedCUs = totalCUs
 	}
 
-	start := findFreeCURange(bitmap, totalCUs, requestedCUs)
+	start, free := findFreeCURange(bitmap, totalCUs, requestedCUs)
 	if start < 0 {
-		free := countFreeCUs(bitmap, totalCUs)
 		klog.V(4).InfoS("No contiguous CU range available",
 			"requested", requestedCUs,
 			"free", free,
@@ -189,7 +190,7 @@ func tryAllocateCUs(customInfo map[string]any, gpuIndex, requestedCUs int) (mask
 		"gpuIndex", gpuIndex,
 		"cuStart", start,
 		"cuCount", requestedCUs,
-		"freeRemaining", countFreeCUs(bitmap, totalCUs),
+		"freeRemaining", free-requestedCUs,
 		"mask", mask)
 
 	return mask, start, true

@@ -39,7 +39,7 @@ func TestFindFreeCURange_EmptyBitmap(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := findFreeCURange(bitmap, tt.totalCUs, tt.count)
+			got, _ := findFreeCURange(bitmap, tt.totalCUs, tt.count)
 			if got != tt.want {
 				t.Errorf("findFreeCURange() = %d, want %d", got, tt.want)
 			}
@@ -53,13 +53,13 @@ func TestFindFreeCURange_PartiallyFilled(t *testing.T) {
 	allocateCUs(bitmap, 0, 152)
 
 	// Request 152 more should start at 152
-	got := findFreeCURange(bitmap, 304, 152)
+	got, _ := findFreeCURange(bitmap, 304, 152)
 	if got != 152 {
 		t.Errorf("findFreeCURange() = %d, want 152", got)
 	}
 
 	// Request 153 should fail (only 152 free)
-	got = findFreeCURange(bitmap, 304, 153)
+	got, _ = findFreeCURange(bitmap, 304, 153)
 	if got != -1 {
 		t.Errorf("findFreeCURange() = %d, want -1", got)
 	}
@@ -69,7 +69,7 @@ func TestFindFreeCURange_FullBitmap(t *testing.T) {
 	bitmap := new(big.Int)
 	allocateCUs(bitmap, 0, 304)
 
-	got := findFreeCURange(bitmap, 304, 1)
+	got, _ := findFreeCURange(bitmap, 304, 1)
 	if got != -1 {
 		t.Errorf("findFreeCURange() = %d, want -1", got)
 	}
@@ -78,7 +78,7 @@ func TestFindFreeCURange_FullBitmap(t *testing.T) {
 func TestFindFreeCURange_ExceedsTotalCUs(t *testing.T) {
 	bitmap := new(big.Int)
 
-	got := findFreeCURange(bitmap, 304, 305)
+	got, _ := findFreeCURange(bitmap, 304, 305)
 	if got != -1 {
 		t.Errorf("findFreeCURange() = %d, want -1", got)
 	}
@@ -87,7 +87,7 @@ func TestFindFreeCURange_ExceedsTotalCUs(t *testing.T) {
 func TestFindFreeCURange_ZeroCount(t *testing.T) {
 	bitmap := new(big.Int)
 
-	got := findFreeCURange(bitmap, 304, 0)
+	got, _ := findFreeCURange(bitmap, 304, 0)
 	if got != -1 {
 		t.Errorf("findFreeCURange() = %d, want -1", got)
 	}
@@ -96,7 +96,7 @@ func TestFindFreeCURange_ZeroCount(t *testing.T) {
 func TestFindFreeCURange_NegativeCount(t *testing.T) {
 	bitmap := new(big.Int)
 
-	got := findFreeCURange(bitmap, 304, -1)
+	got, _ := findFreeCURange(bitmap, 304, -1)
 	if got != -1 {
 		t.Errorf("findFreeCURange() = %d, want -1", got)
 	}
@@ -111,13 +111,13 @@ func TestFindFreeCURange_Fragmented(t *testing.T) {
 	}
 
 	// Can find 4 contiguous free CUs
-	got := findFreeCURange(bitmap, 304, 4)
+	got, _ := findFreeCURange(bitmap, 304, 4)
 	if got != 4 {
 		t.Errorf("findFreeCURange() = %d, want 4", got)
 	}
 
 	// Cannot find 5 contiguous free CUs
-	got = findFreeCURange(bitmap, 304, 5)
+	got, _ = findFreeCURange(bitmap, 304, 5)
 	if got != -1 {
 		t.Errorf("findFreeCURange() = %d, want -1", got)
 	}
@@ -388,13 +388,13 @@ func TestWordBoundary_CrossBit63_64(t *testing.T) {
 	}
 
 	// Request 60 contiguous: first 60 (0-59) are free, so starts at 0
-	got := findFreeCURange(bitmap, 128, 60)
+	got, _ := findFreeCURange(bitmap, 128, 60)
 	if got != 0 {
 		t.Errorf("findFreeCURange() = %d, want 0", got)
 	}
 
 	// Request 61 contiguous: 0-59 is only 60, next free block starts at 68 (68-127 = 60 CUs)
-	got = findFreeCURange(bitmap, 128, 61)
+	got, _ = findFreeCURange(bitmap, 128, 61)
 	if got != -1 {
 		// 0-59 = 60 free, 68-127 = 60 free, neither is 61
 		t.Errorf("findFreeCURange() = %d, want -1", got)
@@ -430,13 +430,13 @@ func TestWordBoundary_VariousTotalCUs(t *testing.T) {
 			}
 
 			// Allocate exactly all CUs
-			got := findFreeCURange(bitmap, tt.totalCUs, tt.totalCUs)
+			got, _ := findFreeCURange(bitmap, tt.totalCUs, tt.totalCUs)
 			if got != 0 {
 				t.Errorf("findFreeCURange(all) = %d, want 0", got)
 			}
 
 			// Cannot allocate totalCUs+1
-			got = findFreeCURange(bitmap, tt.totalCUs, tt.totalCUs+1)
+			got, _ = findFreeCURange(bitmap, tt.totalCUs, tt.totalCUs+1)
 			if got != -1 {
 				t.Errorf("findFreeCURange(all+1) = %d, want -1", got)
 			}

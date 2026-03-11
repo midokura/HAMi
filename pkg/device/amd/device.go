@@ -338,12 +338,13 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 		if requestedCUs > 0 {
 			totalCUs := getTotalCUs(dev.CustomInfo)
 			bitmap := getCUBitmap(dev.CustomInfo, totalCUs)
-			if findFreeCURange(bitmap, totalCUs, requestedCUs) < 0 {
+			start, free := findFreeCURange(bitmap, totalCUs, requestedCUs)
+			if start < 0 {
 				reason[common.CardInsufficientCore]++
 				klog.V(5).InfoS("Insufficient CUs",
 					"device", dev.ID,
 					"requested", requestedCUs,
-					"free", countFreeCUs(bitmap, totalCUs))
+					"free", free)
 				continue
 			}
 		}
