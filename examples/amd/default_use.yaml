@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: amd-gpu-pod
+spec:
+  containers:
+    - name: pytorch-container
+      image: rocm/pytorch:rocm6.2_ubuntu22.04_py3.10_pytorch_release_2.3.0
+      command: ["bash", "-c", "sleep 86400"]
+      resources:
+        limits:
+          amd.com/gpu: 1        # declare how many physical GPUs the pod needs
+          amd.com/gpumem: 48000 # identifies 48000M GPU memory each physical GPU allocates to the pod (Optional, Integer)
+          amd.com/gpucores: 152 # identifies 152 CUs each physical GPU allocates to the pod (Optional, Integer)

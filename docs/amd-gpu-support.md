@@ -42,9 +42,17 @@ Customize your installation by adjusting the [configs](config.md). The default A
 | `resourceMemoryName` | `amd.com/gpumem` |
 | `resourceCoreName` | `amd.com/gpucores` |
 
-### 2. Build libamvgpu.so
+### 2. Build libamvgpu.so and device plugin image
 
-`libamvgpu.so` is the AMD GPU memory virtualization library. It must be built and placed on each GPU node.
+Clone the HAMi repository on each AMD GPU node and build the required components:
+
+```bash
+git clone https://github.com/Project-HAMi/HAMi.git
+cd HAMi
+git submodule update --init libvgpu
+```
+
+Build `libamvgpu.so` (memory virtualization library) and place it on the host:
 
 ```bash
 cd libvgpu
@@ -52,18 +60,27 @@ docker build -f Dockerfile.hip -t libamvgpu-builder .
 docker run --rm -v $(pwd)/dist:/dist libamvgpu-builder
 sudo mkdir -p /opt/hami
 sudo cp dist/libamvgpu.so /opt/hami/
+cd ..
 ```
+
+Build the AMD device plugin image:
+
+```bash
+docker build -f docker/Dockerfile.amd-device-plugin -t hami-amd-device-plugin:latest .
+```
+
+> **Note:** The device plugin image is built locally. If your cluster uses a container runtime
+> other than Docker (e.g. containerd with k3s), import the image accordingly:
+> ```
+> docker save hami-amd-device-plugin:latest | k3s ctr images import -
+> ```
 
 ### 3. Deploy AMD device plugin
 
 The AMD device plugin runs on each GPU node. It detects GPU specifications (CU count, VRAM size) via `rocminfo` and registers them as node annotations.
 
 ```bash
-# Build the device plugin image
-docker build -f docker/Dockerfile.amd-device-plugin -t hami-amd-device-plugin:latest .
-
-# Deploy the DaemonSet
-kubectl apply -f deployments/device-plugin.yaml
+kubectl apply -f deployments/amd-device-plugin.yaml
 ```
 
 ### 4. Verify
@@ -80,7 +97,7 @@ Check that GPUs are detected:
 kubectl get node -o yaml | grep -A5 "hami.io/node-amd-register"
 ```
 
-If node annotations show GPU information (CU count, VRAM), your installation is successful.
+If node annotations show GPU information (CU count, VRAM), your installation is successful. You can try the example [here](../examples/amd/default_use.yaml).
 
 ## Running AMD GPU jobs
 
