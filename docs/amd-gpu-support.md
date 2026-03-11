@@ -14,37 +14,21 @@
 
 * AMD GPU with ROCm driver >= 6.2
 * ROCm runtime installed on the host (`rocminfo` must be available)
-* Kubernetes version >= 1.18
-* helm > 3.0
+* Kubernetes (k3s >= 1.26 verified, standard k8s >= 1.18)
+* Docker (for building images)
+* helm >= 3.0 (for Helm-based deployment)
 
-## Enabling AMD GPU-sharing Support
+## Quick Start (k3s)
 
-### 1. Deploy HAMi scheduler
+This section walks through a verified deployment on k3s. For standard Kubernetes with Helm, see [Helm-based Deployment](#helm-based-deployment) below.
 
-Label your AMD GPU nodes for scheduling:
+### 1. Install k3s
 
-```
-kubectl label nodes {nodeid} gpu=on
-```
-
-Deploy HAMi using Helm. The scheduler includes AMD GPU support by default:
-
-```
-helm repo add hami-charts https://project-hami.github.io/HAMi/
-helm install hami hami-charts/hami -n kube-system
+```bash
+curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable=traefik" sh -
 ```
 
-Customize your installation by adjusting the [configs](config.md). The default AMD GPU resource names are:
-
-| Config | Default |
-|--------|---------|
-| `resourceCountName` | `amd.com/gpu` |
-| `resourceMemoryName` | `amd.com/gpumem` |
-| `resourceCoreName` | `amd.com/gpucores` |
-
-### 2. Build libamvgpu.so and device plugin image
-
-Clone the HAMi repository on each AMD GPU node and build the required components:
+### 2. Clone HAMi and build components
 
 ```bash
 git clone https://github.com/Project-HAMi/HAMi.git
@@ -52,7 +36,7 @@ cd HAMi
 git submodule update --init libvgpu
 ```
 
-Build `libamvgpu.so` (memory virtualization library) and place it on the host:
+Build `libamvgpu.so` (memory virtualization library):
 
 ```bash
 cd libvgpu
@@ -63,33 +47,65 @@ sudo cp dist/libamvgpu.so /opt/hami/
 cd ..
 ```
 
-Build the AMD device plugin image:
+Build Docker images for the scheduler and device plugin:
 
 ```bash
+docker build -f docker/Dockerfile.scheduler-build -t hami-scheduler:latest .
 docker build -f docker/Dockerfile.amd-device-plugin -t hami-amd-device-plugin:latest .
 ```
 
-> **Note:** The device plugin image is built locally. If your cluster uses a container runtime
-> other than Docker (e.g. containerd with k3s), import the image accordingly:
-> ```
-> docker save hami-amd-device-plugin:latest | k3s ctr images import -
-> ```
-
-### 3. Deploy AMD device plugin
-
-The AMD device plugin runs on each GPU node. It detects GPU specifications (CU count, VRAM size) via `rocminfo` and registers them as node annotations.
+Import images into k3s containerd:
 
 ```bash
+docker save hami-scheduler:latest | k3s ctr images import -
+docker save hami-amd-device-plugin:latest | k3s ctr images import -
+```
+
+### 3. Configure k3s scheduler extender
+
+Copy the extender configuration and restart k3s:
+
+```bash
+sudo cp deployments/k3s-scheduler-extender-config.yaml /etc/rancher/k3s/scheduler-extender-config.yaml
+
+sudo tee /etc/rancher/k3s/config.yaml > /dev/null <<'EOF'
+disable:
+  - traefik
+kube-scheduler-arg:
+  - "config=/etc/rancher/k3s/scheduler-extender-config.yaml"
+EOF
+
+sudo systemctl restart k3s
+```
+
+Wait for the node to become Ready:
+
+```bash
+kubectl get nodes --watch
+```
+
+### 4. Deploy scheduler and device plugin
+
+Label your GPU node:
+
+```bash
+kubectl label nodes $(hostname) gpu=on
+```
+
+Deploy the HAMi scheduler and AMD device plugin:
+
+```bash
+kubectl apply -f deployments/amd-scheduler.yaml
 kubectl apply -f deployments/amd-device-plugin.yaml
 ```
 
-### 4. Verify
+### 5. Verify
+
+Check that pods are running:
 
 ```
-kubectl get pods -n kube-system
+kubectl get pods -n kube-system -l 'app in (hami-scheduler, hami-amd-device-plugin)'
 ```
-
-Verify that `hami-scheduler` and `hami-amd-device-plugin` pods are in the *Running* state.
 
 Check that GPUs are detected:
 
@@ -97,7 +113,41 @@ Check that GPUs are detected:
 kubectl get node -o yaml | grep -A5 "hami.io/node-amd-register"
 ```
 
-If node annotations show GPU information (CU count, VRAM), your installation is successful. You can try the example [here](../examples/amd/default_use.yaml).
+Check the node GPU capacity:
+
+```
+kubectl get node -o custom-columns='NAME:.metadata.name,GPU:.status.capacity.amd\.com/gpu'
+```
+
+If the GPU column shows a number greater than 0, your installation is successful. You can try the [example pod](../examples/amd/default_use.yaml).
+
+> **Troubleshooting:** If `amd.com/gpu` shows `0` after deploying the device plugin, restart it:
+> ```
+> kubectl rollout restart daemonset/hami-amd-device-plugin -n kube-system
+> ```
+
+---
+
+## Helm-based Deployment
+
+For standard Kubernetes clusters, deploy HAMi using Helm:
+
+```
+helm repo add hami-charts https://project-hami.github.io/HAMi/
+helm install hami hami-charts/hami -n kube-system
+```
+
+The Helm chart deploys the scheduler (with kube-scheduler sidecar and admission webhook) and the NVIDIA device plugin. For AMD GPUs, you still need to build and deploy the AMD device plugin separately — follow steps 2 and 4 from the Quick Start above.
+
+Customize your installation by adjusting the [configs](config.md). The default AMD GPU resource names are:
+
+| Config | Default |
+|--------|---------|
+| `resourceCountName` | `amd.com/gpu` |
+| `resourceMemoryName` | `amd.com/gpumem` |
+| `resourceCoreName` | `amd.com/gpucores` |
+
+---
 
 ## Running AMD GPU jobs
 
