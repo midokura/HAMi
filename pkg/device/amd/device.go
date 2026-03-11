@@ -20,7 +20,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
@@ -90,6 +89,8 @@ func (dev *AMDDevices) CommonWord() string {
 	return AMDDevice
 }
 
+// ParseConfig registers AMD-specific flags. Currently no flags are needed;
+// GPU specs are auto-detected by the device plugin via rocminfo.
 func ParseConfig(fs *flag.FlagSet) {
 }
 
@@ -183,22 +184,27 @@ func (dev *AMDDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]s
 	return *annoinput
 }
 
+// LockNode is a no-op for AMD. CU bitmap allocation is atomic within Fit().
 func (dev *AMDDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	return nil
 }
 
+// ReleaseNodeLock is a no-op for AMD. See LockNode.
 func (dev *AMDDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
 	return nil
 }
 
+// NodeCleanUp is a no-op for AMD. Device state is managed by the device plugin.
 func (dev *AMDDevices) NodeCleanUp(nn string) error {
 	return nil
 }
 
 func (dev *AMDDevices) checkType(n device.ContainerDeviceRequest) bool {
-	return strings.Compare(n.Type, AMDDevice) == 0
+	return n.Type == AMDDevice
 }
 
+// CheckHealth always reports healthy. AMD GPU health is monitored by the device plugin
+// via rocminfo, not by the scheduler.
 func (dev *AMDDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	return true, true
 }

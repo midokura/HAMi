@@ -95,7 +95,7 @@ func (p *AMDDevicePlugin) Stop() error {
 
 // Serve starts the gRPC server.
 func (p *AMDDevicePlugin) Serve() error {
-	os.Remove(p.socket)
+	_ = os.Remove(p.socket)
 	sock, err := net.Listen("unix", p.socket)
 	if err != nil {
 		return err
