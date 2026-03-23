@@ -54,6 +54,8 @@ spec:
                   fieldPath: spec.nodeName
             - name: LD_LIBRARY_PATH
               value: /opt/rocm/lib:/opt/amdgpu/lib/x86_64-linux-gnu
+            - name: PATH
+              value: /opt/rocm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           securityContext:
             privileged: true
           volumeMounts:
@@ -70,7 +72,7 @@ spec:
               mountPath: /opt/rocm
               readOnly: true
             - name: rocminfo
-              mountPath: /usr/bin/rocminfo
+              mountPath: /opt/rocm/bin/rocminfo
               readOnly: true
       volumes:
         - name: device-plugins
@@ -92,5 +94,5 @@ spec:
             type: Directory
         - name: rocminfo
           hostPath:
-            path: /usr/bin/rocminfo
+            path: /opt/rocm/bin/rocminfo
             type: File
