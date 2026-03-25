@@ -1,4 +1,4 @@
 [submodule "libvgpu"]
 	path = libvgpu
 	url = https://github.com/midokura/HAMi-core.git
-	branch = main
+	branch = contrib/amd-upstream
