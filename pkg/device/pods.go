@@ -70,11 +70,34 @@ func (m *PodManager) AddPod(pod *corev1.Pod, nodeID string, devices PodDevices) 
 			"devices", devices,
 		)
 	} else {
-		m.pods[pod.UID].Devices = devices
-		klog.V(5).InfoS("Pod devices updated",
-			"pod", klog.KRef(pod.Namespace, pod.Name),
-			"devices", devices,
-		)
+		// Only update devices if the new data has actual container devices.
+		// The device plugin erases annotation data after processing
+		// (EraseNextDeviceTypeFromAnnotation), which triggers an informer
+		// update with empty devices. We must not overwrite the scheduler's
+		// original allocation data with empty data.
+		hasDevices := false
+		for _, psd := range devices {
+			for _, cd := range psd {
+				if len(cd) > 0 {
+					hasDevices = true
+					break
+				}
+			}
+			if hasDevices {
+				break
+			}
+		}
+		if hasDevices {
+			m.pods[pod.UID].Devices = devices
+			klog.V(4).InfoS("Pod devices updated",
+				"pod", klog.KRef(pod.Namespace, pod.Name),
+				"devices", devices,
+			)
+		} else {
+			klog.V(4).InfoS("Skipping pod device update (empty devices from annotation erase)",
+				"pod", klog.KRef(pod.Namespace, pod.Name),
+			)
+		}
 	}
 
 	return !exists

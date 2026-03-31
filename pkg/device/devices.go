@@ -17,6 +17,7 @@ limitations under the License.
 package device
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -302,18 +303,31 @@ func UnMarshalNodeDevices(str string) ([]*DeviceInfo, error) {
 func EncodeContainerDevices(cd ContainerDevices) string {
 	tmp := ""
 	for _, val := range cd {
-		tmp += val.UUID + "," + val.Type + "," + strconv.Itoa(int(val.Usedmem)) + "," + strconv.Itoa(int(val.Usedcores)) + OneContainerMultiDeviceSplitSymbol
+		entry := val.UUID + "," + val.Type + "," + strconv.Itoa(int(val.Usedmem)) + "," + strconv.Itoa(int(val.Usedcores))
+		if len(val.CustomInfo) > 0 {
+			ciJSON, err := json.Marshal(val.CustomInfo)
+			if err == nil {
+				entry += "," + base64.StdEncoding.EncodeToString(ciJSON)
+			}
+		}
+		tmp += entry + OneContainerMultiDeviceSplitSymbol
 	}
 	klog.Infof("Encoded container Devices: %s", tmp)
 	return tmp
-	//return strings.Join(cd, ",")
 }
 
 func EncodeContainerDeviceType(cd ContainerDevices, t string) string {
 	tmp := ""
 	for _, val := range cd {
 		if strings.Compare(val.Type, t) == 0 {
-			tmp += val.UUID + "," + val.Type + "," + strconv.Itoa(int(val.Usedmem)) + "," + strconv.Itoa(int(val.Usedcores))
+			entry := val.UUID + "," + val.Type + "," + strconv.Itoa(int(val.Usedmem)) + "," + strconv.Itoa(int(val.Usedcores))
+			if len(val.CustomInfo) > 0 {
+				ciJSON, err := json.Marshal(val.CustomInfo)
+				if err == nil {
+					entry += "," + base64.StdEncoding.EncodeToString(ciJSON)
+				}
+			}
+			tmp += entry
 		}
 		tmp += OneContainerMultiDeviceSplitSymbol
 	}
@@ -347,21 +361,29 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 	}
 	cd := strings.Split(str, OneContainerMultiDeviceSplitSymbol)
 	contdev := ContainerDevices{}
-	tmpdev := ContainerDevice{}
 	klog.V(5).Infof("Start to decode container device %s", str)
 	for _, val := range cd {
 		if strings.Contains(val, ",") {
-			//fmt.Println("cd is ", val)
-			tmpstr := strings.Split(val, ",")
+			tmpstr := strings.SplitN(val, ",", 5)
 			if len(tmpstr) < 4 {
 				return ContainerDevices{}, fmt.Errorf("pod annotation format error; information missing, please do not use nodeName field in task")
 			}
+			tmpdev := ContainerDevice{}
 			tmpdev.UUID = tmpstr[0]
 			tmpdev.Type = tmpstr[1]
 			devmem, _ := strconv.ParseInt(tmpstr[2], 10, 32)
 			tmpdev.Usedmem = int32(devmem)
 			devcores, _ := strconv.ParseInt(tmpstr[3], 10, 32)
 			tmpdev.Usedcores = int32(devcores)
+			if len(tmpstr) >= 5 && tmpstr[4] != "" {
+				ciBytes, err := base64.StdEncoding.DecodeString(tmpstr[4])
+				if err == nil {
+					ci := make(map[string]any)
+					if err := json.Unmarshal(ciBytes, &ci); err == nil {
+						tmpdev.CustomInfo = ci
+					}
+				}
+			}
 			contdev = append(contdev, tmpdev)
 		}
 	}

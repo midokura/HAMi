@@ -1,0 +1,11 @@
+FROM golang:1.25.5-bookworm AS gobuild
+ADD . /k8s-vgpu
+RUN cd /k8s-vgpu && go build -ldflags '-s -w' -o bin/scheduler ./cmd/scheduler
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=gobuild /k8s-vgpu/bin/scheduler /k8s-vgpu/bin/scheduler
+COPY docker/entrypoint.sh /k8s-vgpu/bin/entrypoint.sh
+COPY lib /k8s-vgpu/lib
+ENV PATH="/k8s-vgpu/bin:${PATH}"
+ENTRYPOINT ["scheduler"]

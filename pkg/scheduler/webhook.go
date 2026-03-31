@@ -110,11 +110,10 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 
 func fitResourceQuota(pod *corev1.Pod) bool {
 	for deviceName, dev := range device.GetDevices() {
-		// Only supports NVIDIA
-		if deviceName != nvidia.NvidiaGPUDevice {
-			continue
+		var memoryFactor int32 = 1
+		if deviceName == nvidia.NvidiaGPUDevice {
+			memoryFactor = nvidia.MemoryFactor
 		}
-		memoryFactor := nvidia.MemoryFactor
 		resourceNames := dev.GetResourceNames()
 		resourceName := corev1.ResourceName(resourceNames.ResourceCountName)
 		memResourceName := corev1.ResourceName(resourceNames.ResourceMemoryName)

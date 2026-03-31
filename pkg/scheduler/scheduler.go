@@ -42,6 +42,7 @@ import (
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/amd"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -572,9 +573,19 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 							deviceID = strings.Split(deviceID, "[")[0]
 						}
 						if d.Device.ID == deviceID {
-							d.Device.Used++
-							d.Device.Usedmem += udevice.Usedmem
-							d.Device.Usedcores += udevice.Usedcores
+							// Use device-type-specific AddResourceUsage to rebuild
+							// all usage state (including CU bitmaps for AMD).
+							if devHandler, ok := device.DevicesMap[udevice.Type]; ok {
+								if err := devHandler.AddResourceUsage(nil, d.Device, &udevice); err != nil {
+									klog.ErrorS(err, "AddResourceUsage failed during usage rebuild",
+										"device", deviceID, "type", udevice.Type)
+								}
+							} else {
+								// Fallback for unknown device types
+								d.Device.Used++
+								d.Device.Usedmem += udevice.Usedmem
+								d.Device.Usedcores += udevice.Usedcores
+							}
 							d.Device.PodInfos = append(d.Device.PodInfos, p)
 
 							if strings.Contains(udevice.UUID, "[") {
@@ -757,6 +768,32 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		"podName", args.Pod.Name,
 		"nodeID", m.NodeID,
 		"devices", m.Devices)
+	// Log per-container GPU allocation details (CU mask, memory) for k9s visibility
+	for devType, psd := range m.Devices {
+		for ctrIdx, cds := range psd {
+			for _, cd := range cds {
+				cuMask := ""
+				cuCount := 0
+				if cd.CustomInfo != nil {
+					if v, ok := cd.CustomInfo[amd.CUMaskKey]; ok {
+						cuMask, _ = v.(string)
+					}
+					if v, ok := cd.CustomInfo[amd.CUCountKey]; ok {
+						cuCount, _ = v.(int)
+					}
+				}
+				klog.InfoS("GPU allocation",
+					"pod", klog.KRef(args.Pod.Namespace, args.Pod.Name),
+					"container", ctrIdx,
+					"deviceType", devType,
+					"uuid", cd.UUID,
+					"memoryMB", cd.Usedmem,
+					"cuMask", cuMask,
+					"cuCount", cuCount,
+				)
+			}
+		}
+	}
 	annotations := make(map[string]string)
 	annotations[util.AssignedNodeAnnotations] = m.NodeID
 	annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
