@@ -17,6 +17,7 @@ limitations under the License.
 package amd
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"slices"
@@ -33,6 +34,7 @@ import (
 type AMDDevices struct {
 	resourceCountName  string
 	resourceMemoryName string
+	resourceCoreName   string
 }
 
 const (
@@ -43,11 +45,21 @@ const (
 	AMDNoUseUUID       = "amd.com/nouse-gpu-uuid"
 	AMDAssignedNode    = "amd.com/predicate-node"
 	Mi300xMemory       = 192000
+	// Mi300xCU is the compute-unit (CU) count of an MI300X, used as the total
+	// CU count for bitmap partitioning until per-device discovery lands.
+	Mi300xCU = 304
+	// AMDCUMaskAnno carries the per-device CU bitmap as a JSON array
+	// [{"uuid":"<UUID>","cu_mask":"<mask_hex>"}]. The scheduler writes it; the
+	// device plugin reads it to inject ROC_GLOBAL_CU_MASK. It uses the AMD
+	// vendor namespace (amd.com/) and is kept separate from the shared
+	// allocation annotation so no shared encoding change is needed.
+	AMDCUMaskAnno = "amd.com/cu-mask"
 )
 
 type AMDConfig struct {
 	ResourceCountName  string `yaml:"resourceCountName"`
 	ResourceMemoryName string `yaml:"resourceMemoryName"`
+	ResourceCoreName   string `yaml:"resourceCoreName"`
 }
 
 func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
@@ -58,6 +70,7 @@ func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
 	return &AMDDevices{
 		resourceCountName:  config.ResourceCountName,
 		resourceMemoryName: config.ResourceMemoryName,
+		resourceCoreName:   config.ResourceCoreName,
 	}
 }
 
@@ -90,11 +103,11 @@ func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 			ID:           n.Name + "-" + AMDDevice + "-" + fmt.Sprint(i),
 			Count:        1,
 			Devmem:       Mi300xMemory,
-			Devcore:      100,
+			Devcore:      Mi300xCU,
 			Type:         AMDDevice,
 			Numa:         0,
 			Health:       true,
-			CustomInfo:   make(map[string]any),
+			CustomInfo:   map[string]any{CUTotalKey: Mi300xCU},
 			DeviceVendor: AMDCommonWord,
 		})
 		i++
@@ -111,9 +124,64 @@ func (dev *AMDDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]s
 	devlist, ok := pd[AMDDevice]
 	if ok && len(devlist) > 0 {
 		(*annoinput)[device.SupportDevices[AMDDevice]] = device.EncodePodSingleDevice(devlist)
+		// AMD-specific: carry the CU bitmap in a dedicated annotation so the
+		// shared container encoding stays unchanged. The device plugin reads
+		// this to inject ROC_GLOBAL_CU_MASK.
+		if cuMask := encodeCUMaskAnno(devlist); cuMask != "" {
+			(*annoinput)[AMDCUMaskAnno] = cuMask
+		}
 	}
 	klog.V(4).InfoS("annos", "input", (*annoinput))
 	return *annoinput
+}
+
+// cuMaskEntry is one element of the amd.com/cu-mask annotation JSON array.
+type cuMaskEntry struct {
+	UUID   string `json:"uuid"`
+	CUMask string `json:"cu_mask"`
+}
+
+// encodeCUMaskAnno builds the amd.com/cu-mask value as a JSON array
+// [{"uuid":"<UUID>","cu_mask":"<mask_hex>"}] from the allocated devices.
+func encodeCUMaskAnno(pd device.PodSingleDevice) string {
+	var entries []cuMaskEntry
+	for _, ctrDevs := range pd {
+		for _, cd := range ctrDevs {
+			if cd.CustomInfo == nil {
+				continue
+			}
+			if mask, ok := cd.CustomInfo[CUMaskKey].(string); ok && mask != "" {
+				entries = append(entries, cuMaskEntry{UUID: cd.UUID, CUMask: mask})
+			}
+		}
+	}
+	if len(entries) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(entries)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// lookupCUMask returns the CU mask for the given device UUID from the
+// amd.com/cu-mask annotation, or "" if absent.
+func lookupCUMask(annotations map[string]string, uuid string) string {
+	raw, ok := annotations[AMDCUMaskAnno]
+	if !ok || raw == "" {
+		return ""
+	}
+	var entries []cuMaskEntry
+	if err := json.Unmarshal([]byte(raw), &entries); err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if e.UUID == uuid {
+			return e.CUMask
+		}
+	}
+	return ""
 }
 
 func (dev *AMDDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
@@ -143,7 +211,7 @@ func (dev *AMDDevices) GetResourceNames() device.ResourceNames {
 	return device.ResourceNames{
 		ResourceCountName:  dev.resourceCountName,
 		ResourceMemoryName: dev.resourceMemoryName,
-		ResourceCoreName:   "",
+		ResourceCoreName:   dev.resourceCoreName,
 	}
 }
 
@@ -157,15 +225,33 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
+			// Memory limit (MB); default to the whole device when unset.
+			memreq := int32(Mi300xMemory)
+			if dev.resourceMemoryName != "" {
+				if mv, ok := ctr.Resources.Limits[corev1.ResourceName(dev.resourceMemoryName)]; ok {
+					if m, ok := mv.AsInt64(); ok {
+						memreq = int32(m)
+					}
+				}
+			}
+			// CU count; 0 means use all CUs (whole-card).
+			coresreq := int32(0)
+			if dev.resourceCoreName != "" {
+				if cv, ok := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCoreName)]; ok {
+					if c, ok := cv.AsInt64(); ok {
+						coresreq = int32(c)
+					}
+				}
+			}
 			klog.InfoS("Detected AMD device request",
 				"container", ctr.Name,
-				"deviceCount", n)
+				"deviceCount", n, "memreq", memreq, "coresreq(CUs)", coresreq)
 			return device.ContainerDeviceRequest{
 				Nums:             int32(n),
 				Type:             AMDDevice,
-				Memreq:           Mi300xMemory,
+				Memreq:           memreq,
 				MemPercentagereq: 0,
-				Coresreq:         0,
+				Coresreq:         coresreq,
 			}
 		}
 	}
@@ -180,6 +266,34 @@ func (dev *AMDDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, 
 	n.Used++
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
+
+	// Reconstruct CU occupancy into the device bitmap so later allocations stay
+	// non-overlapping. The current scheduling cycle carries start/count in the
+	// in-memory ContainerDevice; already-scheduled pods carry the mask in the
+	// hami.io/amd-cu-mask annotation.
+	if n.CustomInfo == nil {
+		n.CustomInfo = make(map[string]any)
+	}
+	totalCUs := getTotalCUs(n.CustomInfo)
+	if totalCUs == 0 {
+		return nil
+	}
+	bitmap := getCUBitmap(n.CustomInfo, totalCUs)
+	if ctr.CustomInfo != nil {
+		if startRaw, ok := ctr.CustomInfo[CUStartKey]; ok {
+			if countRaw, ok := ctr.CustomInfo[CUCountKey]; ok {
+				if err := allocateCUs(bitmap, toInt(startRaw), toInt(countRaw)); err != nil {
+					klog.ErrorS(err, "Failed to apply CU allocation", "device", n.ID)
+				}
+				return nil
+			}
+		}
+	}
+	if mask := lookupCUMask(pod.GetAnnotations(), ctr.UUID); mask != "" {
+		if maskInt, err := parseCUMask(mask); err == nil {
+			bitmap.Or(bitmap, maskInt)
+		}
+	}
 	return nil
 }
 
@@ -217,17 +331,51 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 			continue
 		}
 
+		// Memory availability.
+		if k.Memreq > 0 && dev.Totalmem-dev.Usedmem < k.Memreq {
+			reason[common.CardInsufficientMemory]++
+			klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "device", dev.ID, "available", dev.Totalmem-dev.Usedmem, "request", k.Memreq)
+			continue
+		}
+
+		// CU availability (only when a CU count is requested).
+		if dev.CustomInfo == nil {
+			dev.CustomInfo = make(map[string]any)
+		}
+		requestedCUs := int(k.Coresreq)
+		if requestedCUs > 0 {
+			totalCUs := getTotalCUs(dev.CustomInfo)
+			bitmap := getCUBitmap(dev.CustomInfo, totalCUs)
+			if start, free := findFreeCURange(bitmap, totalCUs, requestedCUs); start < 0 {
+				reason[common.CardInsufficientCore]++
+				klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "request", requestedCUs, "free", free)
+				continue
+			}
+		}
+
 		klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
 
 		if k.Nums > 0 {
 			k.Nums--
+			ctrCustomInfo := map[string]any{}
+			if requestedCUs > 0 {
+				mask, cuStart, allocOK := tryAllocateCUs(dev.CustomInfo, int(dev.Index), requestedCUs)
+				if !allocOK {
+					reason[common.CardInsufficientCore]++
+					k.Nums++ // rollback the count decrement
+					continue
+				}
+				ctrCustomInfo[CUMaskKey] = mask
+				ctrCustomInfo[CUStartKey] = cuStart
+				ctrCustomInfo[CUCountKey] = requestedCUs
+			}
 			tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
 				Idx:        int(dev.Index),
 				UUID:       dev.ID,
 				Type:       k.Type,
-				Usedmem:    Mi300xMemory,
-				Usedcores:  0,
-				CustomInfo: map[string]any{},
+				Usedmem:    k.Memreq,
+				Usedcores:  k.Coresreq,
+				CustomInfo: ctrCustomInfo,
 			})
 		}
 		if k.Nums == 0 {

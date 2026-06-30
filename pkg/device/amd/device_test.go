@@ -114,11 +114,11 @@ func Test_GetNodeDevices(t *testing.T) {
 					ID:           "test-AMDGPU-0",
 					Count:        int32(1),
 					Devmem:       int32(Mi300xMemory),
-					Devcore:      int32(100),
+					Devcore:      int32(Mi300xCU),
 					Type:         AMDDevice,
 					Numa:         0,
 					Health:       true,
-					CustomInfo:   map[string]any{},
+					CustomInfo:   map[string]any{CUTotalKey: Mi300xCU},
 					DeviceVendor: AMDCommonWord,
 				},
 			},
@@ -176,7 +176,7 @@ func Test_PatchAnnotations(t *testing.T) {
 								Type:       AMDDevice,
 								Usedmem:    int32(0),
 								Usedcores:  int32(3),
-								CustomInfo: map[string]any{},
+								CustomInfo: map[string]any{CUTotalKey: 8},
 							},
 							{
 								Idx:        1,
@@ -184,7 +184,7 @@ func Test_PatchAnnotations(t *testing.T) {
 								Type:       AMDDevice,
 								Usedmem:    int32(0),
 								Usedcores:  int32(3),
-								CustomInfo: map[string]any{},
+								CustomInfo: map[string]any{CUTotalKey: 8},
 							},
 						},
 					},
@@ -335,7 +335,7 @@ func TestDevices_Fit(t *testing.T) {
 					Numa:       0,
 					Type:       AMDDevice,
 					Health:     true,
-					CustomInfo: map[string]any{},
+					CustomInfo: map[string]any{CUTotalKey: 8},
 				},
 				{
 					ID:         "dev-1",
@@ -349,7 +349,7 @@ func TestDevices_Fit(t *testing.T) {
 					Numa:       0,
 					Type:       AMDDevice,
 					Health:     true,
-					CustomInfo: map[string]any{},
+					CustomInfo: map[string]any{CUTotalKey: 8},
 				},
 			},
 			request: device.ContainerDeviceRequest{
@@ -380,7 +380,7 @@ func TestDevices_Fit(t *testing.T) {
 					Numa:       0,
 					Type:       AMDDevice,
 					Health:     true,
-					CustomInfo: map[string]any{},
+					CustomInfo: map[string]any{CUTotalKey: 8},
 				},
 				{
 					ID:         "dev-1",
@@ -394,7 +394,7 @@ func TestDevices_Fit(t *testing.T) {
 					Numa:       0,
 					Type:       AMDDevice,
 					Health:     true,
-					CustomInfo: map[string]any{},
+					CustomInfo: map[string]any{CUTotalKey: 8},
 				},
 			},
 			request: device.ContainerDeviceRequest{
@@ -424,7 +424,7 @@ func TestDevices_Fit(t *testing.T) {
 				Numa:       0,
 				Health:     true,
 				Type:       AMDDevice,
-				CustomInfo: map[string]any{},
+				CustomInfo: map[string]any{CUTotalKey: 8},
 			}},
 			request: device.ContainerDeviceRequest{
 				Nums:             1,
@@ -453,7 +453,7 @@ func TestDevices_Fit(t *testing.T) {
 				Numa:       0,
 				Type:       AMDDevice,
 				Health:     true,
-				CustomInfo: map[string]any{},
+				CustomInfo: map[string]any{CUTotalKey: 8},
 			}},
 			request: device.ContainerDeviceRequest{
 				Nums:             1,
@@ -482,7 +482,7 @@ func TestDevices_Fit(t *testing.T) {
 				Numa:       0,
 				Type:       AMDDevice,
 				Health:     true,
-				CustomInfo: map[string]any{},
+				CustomInfo: map[string]any{CUTotalKey: 8},
 			}},
 			request: device.ContainerDeviceRequest{
 				Nums:             1,
@@ -511,7 +511,7 @@ func TestDevices_Fit(t *testing.T) {
 				Numa:       0,
 				Type:       AMDDevice,
 				Health:     true,
-				CustomInfo: map[string]any{},
+				CustomInfo: map[string]any{CUTotalKey: 8},
 			}},
 			request: device.ContainerDeviceRequest{
 				Nums:             1,
