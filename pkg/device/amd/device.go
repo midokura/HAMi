@@ -25,6 +25,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
+	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -54,6 +55,11 @@ const (
 	// vendor namespace (amd.com/) and is kept separate from the shared
 	// allocation annotation so no shared encoding change is needed.
 	AMDCUMaskAnno = "amd.com/cu-mask"
+	// NodeLockAMD is the node-wide scheduling lock shared across device types
+	// (the nodelock package hardcodes "hami.io/mutex.lock"). It makes the CU
+	// bitmap read-modify-write atomic so concurrent pods never receive
+	// overlapping masks.
+	NodeLockAMD = "hami.io/mutex.lock"
 )
 
 type AMDConfig struct {
@@ -185,11 +191,31 @@ func lookupCUMask(annotations map[string]string, uuid string) string {
 }
 
 func (dev *AMDDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
-	return nil
+	found := false
+	for _, val := range p.Spec.Containers {
+		if dev.GenerateResourceRequests(&val).Nums > 0 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+	return nodelock.LockNode(n.Name, NodeLockAMD, p)
 }
 
 func (dev *AMDDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
-	return nil
+	found := false
+	for _, val := range p.Spec.Containers {
+		if dev.GenerateResourceRequests(&val).Nums > 0 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+	return nodelock.ReleaseNodeLock(n.Name, NodeLockAMD, p, false)
 }
 
 func (dev *AMDDevices) NodeCleanUp(nn string) error {
