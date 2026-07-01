@@ -191,6 +191,13 @@ func encodeCUMaskAnno(pd device.PodSingleDevice) string {
 	return string(b)
 }
 
+// LookupCUMask returns the CU mask for the given device UUID from the
+// amd.com/cu-mask annotation, or "" if absent. Exported for the device plugin,
+// which injects it as ROC_GLOBAL_CU_MASK.
+func LookupCUMask(annotations map[string]string, uuid string) string {
+	return lookupCUMask(annotations, uuid)
+}
+
 // lookupCUMask returns the CU mask for the given device UUID from the
 // amd.com/cu-mask annotation, or "" if absent.
 func lookupCUMask(annotations map[string]string, uuid string) string {
