@@ -136,6 +136,38 @@ func Test_GetNodeDevices(t *testing.T) {
 	}
 }
 
+func Test_GetNodeDevices_FromAnnotation(t *testing.T) {
+	// The device plugin publishes real per-device specs (here an MI210: 104 CUs,
+	// 64 GB) in the node-register annotation; GetNodeDevices must use them
+	// instead of the hardcoded MI300X capacity fallback.
+	real := []*device.DeviceInfo{{
+		Index:   0,
+		ID:      "gpu-uuid-abc",
+		Count:   1,
+		Devmem:  65536,
+		Devcore: 104,
+		Type:    AMDDevice,
+		Health:  true,
+	}}
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-real",
+			Annotations: map[string]string{
+				RegisterAnnos: device.MarshalNodeDevices(real),
+			},
+		},
+	}
+	dev := InitAMDGPUDevice(AMDConfig{ResourceCountName: "amd.com/gpu"})
+	got, err := dev.GetNodeDevices(node)
+	assert.NilError(t, err)
+	assert.Equal(t, len(got), 1)
+	assert.Equal(t, got[0].ID, "gpu-uuid-abc")
+	assert.Equal(t, got[0].Devcore, int32(104))
+	assert.Equal(t, got[0].Devmem, int32(65536))
+	assert.Equal(t, got[0].DeviceVendor, AMDCommonWord)
+	assert.Equal(t, getTotalCUs(got[0].CustomInfo), 104)
+}
+
 func Test_PatchAnnotations(t *testing.T) {
 	tests := []struct {
 		name string

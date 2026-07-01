@@ -60,6 +60,10 @@ const (
 	// bitmap read-modify-write atomic so concurrent pods never receive
 	// overlapping masks.
 	NodeLockAMD = "hami.io/mutex.lock"
+	// RegisterAnnos is the node annotation the device plugin patches with the
+	// per-device spec (JSON array of DeviceInfo). The scheduler reads it for
+	// real discovery and falls back to capacity synthesis when it is absent.
+	RegisterAnnos = "hami.io/node-amd-register"
 )
 
 type AMDConfig struct {
@@ -97,13 +101,35 @@ func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 }
 
 func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
-	nodedevices := []*device.DeviceInfo{}
-	i := 0
+	// Prefer real per-device info published by the device plugin as a JSON
+	// node-register annotation; fall back to capacity synthesis when it is
+	// absent (e.g. before the device plugin lands on the node).
+	if devEncoded, ok := n.Annotations[RegisterAnnos]; ok && devEncoded != "" {
+		nodedevices, err := device.UnMarshalNodeDevices(devEncoded)
+		if err != nil {
+			klog.ErrorS(err, "failed to decode AMD node-register annotation, falling back to capacity", "node", n.Name)
+		} else if len(nodedevices) > 0 {
+			for _, nd := range nodedevices {
+				nd.DeviceVendor = AMDCommonWord
+				if nd.CustomInfo == nil {
+					nd.CustomInfo = make(map[string]any)
+				}
+				// For AMD, Devcore carries the CU count; expose it to the
+				// bitmap allocator when the plugin did not set it explicitly.
+				if getTotalCUs(nd.CustomInfo) == 0 {
+					nd.CustomInfo[CUTotalKey] = int(nd.Devcore)
+				}
+			}
+			return nodedevices, nil
+		}
+	}
+
 	counts, ok := n.Status.Capacity.Name(corev1.ResourceName(dev.resourceCountName), resource.DecimalSI).AsInt64()
 	if !ok || counts == 0 {
 		return []*device.DeviceInfo{}, fmt.Errorf("device not found %s", dev.resourceCountName)
 	}
-	for int64(i) < counts {
+	nodedevices := []*device.DeviceInfo{}
+	for i := int64(0); i < counts; i++ {
 		nodedevices = append(nodedevices, &device.DeviceInfo{
 			Index:        uint(i),
 			ID:           n.Name + "-" + AMDDevice + "-" + fmt.Sprint(i),
@@ -116,12 +142,6 @@ func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 			CustomInfo:   map[string]any{CUTotalKey: Mi300xCU},
 			DeviceVendor: AMDCommonWord,
 		})
-		i++
-	}
-	i = 0
-	for i < len(nodedevices) {
-		klog.V(4).Infoln("Registered AMD nodedevices:", nodedevices[i])
-		i++
 	}
 	return nodedevices, nil
 }
