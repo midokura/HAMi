@@ -75,6 +75,10 @@ type AMDConfig struct {
 func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
 	_, ok := device.SupportDevices[AMDDevice]
 	if !ok {
+		// InRequestDevices is the annotation the device plugin decodes in
+		// Allocate() (GetNextDeviceRequest); SupportDevices is the persisted
+		// record. Both must be registered, mirroring the NVIDIA backend.
+		device.InRequestDevices[AMDDevice] = "hami.io/amd-devices-to-allocate"
 		device.SupportDevices[AMDDevice] = "hami.io/amd-devices-allocated"
 	}
 	return &AMDDevices{
@@ -149,6 +153,7 @@ func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 func (dev *AMDDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
 	devlist, ok := pd[AMDDevice]
 	if ok && len(devlist) > 0 {
+		(*annoinput)[device.InRequestDevices[AMDDevice]] = device.EncodePodSingleDevice(devlist)
 		(*annoinput)[device.SupportDevices[AMDDevice]] = device.EncodePodSingleDevice(devlist)
 		// AMD-specific: carry the CU bitmap in a dedicated annotation so the
 		// shared container encoding stays unchanged. The device plugin reads
@@ -350,6 +355,39 @@ func (dev *AMDDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, 
 	return nil
 }
 
+// rebuildCUBitmapFromPods reconstructs a device's CU occupancy bitmap from the
+// amd.com/cu-mask annotations of the pods already scheduled onto it. The shared
+// node-usage snapshot only accumulates core counts (Usedcores); it has no
+// knowledge of the AMD CU bitmap, so Fit calls this to rebuild occupancy from
+// scratch each scheduling cycle before selecting a non-overlapping range.
+func rebuildCUBitmapFromPods(dev *device.DeviceUsage) {
+	if dev.CustomInfo == nil {
+		return
+	}
+	totalCUs := getTotalCUs(dev.CustomInfo)
+	if totalCUs == 0 {
+		return
+	}
+	// OR each already-scheduled pod's mask into the current bitmap. The
+	// DeviceUsage is rebuilt fresh every scheduling cycle (its CustomInfo is a
+	// clone carrying only cu_total, no bitmap), so this is additive, not
+	// cumulative-across-cycles. OR-ing is idempotent if another path (e.g.
+	// AddResourceUsage) already marked the same range.
+	bitmap := getCUBitmap(dev.CustomInfo, totalCUs)
+	for _, pi := range dev.PodInfos {
+		if pi == nil || pi.Pod == nil {
+			continue
+		}
+		mask := lookupCUMask(pi.Pod.GetAnnotations(), dev.ID)
+		if mask == "" {
+			continue
+		}
+		if maskInt, err := parseCUMask(mask); err == nil {
+			bitmap.Or(bitmap, maskInt)
+		}
+	}
+}
+
 func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeinfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
@@ -395,6 +433,13 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 		if dev.CustomInfo == nil {
 			dev.CustomInfo = make(map[string]any)
 		}
+		// Reconstruct CU occupancy from already-scheduled pods on this device so
+		// the allocator picks a non-overlapping range. The shared node-usage
+		// snapshot tracks core *counts* (Usedcores) but not the AMD CU bitmap,
+		// because Option A keeps the mask in its own amd.com/cu-mask annotation
+		// (no shared-encoding change). Rebuild the bitmap here from those
+		// annotations before searching for a free range.
+		rebuildCUBitmapFromPods(dev)
 		requestedCUs := int(k.Coresreq)
 		if requestedCUs > 0 {
 			totalCUs := getTotalCUs(dev.CustomInfo)
