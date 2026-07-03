@@ -28,9 +28,9 @@ import (
 
 // Test_CUMask_AnnotationRoundTrip verifies the Option-A transport end to end:
 // the scheduler allocates a CU bitmap, persists it in the dedicated
-// hami.io/amd-cu-mask annotation (PatchAnnotations), and rebuilds device
-// occupancy from that annotation (AddResourceUsage) so the next allocation is
-// non-overlapping — all without touching the shared container encoding.
+// amd.com/cu-mask annotation (PatchAnnotations), and rebuilds device occupancy
+// from that annotation (Fit / rebuildCUBitmapFromPods) so the next allocation
+// is non-overlapping — all without touching the shared container encoding.
 func Test_CUMask_AnnotationRoundTrip(t *testing.T) {
 	dev := InitAMDGPUDevice(AMDConfig{
 		ResourceCountName: "amd.com/gpu",
@@ -63,7 +63,7 @@ func Test_CUMask_AnnotationRoundTrip(t *testing.T) {
 	dev.PatchAnnotations(podA, &annosA, device.PodDevices{AMDDevice: device.PodSingleDevice{resA[AMDDevice]}})
 	maskA := lookupCUMask(annosA, "gpu-0")
 	if maskA == "" {
-		t.Fatalf("hami.io/amd-cu-mask was not written; annos=%v", annosA)
+		t.Fatalf("amd.com/cu-mask was not written; annos=%v", annosA)
 	}
 	if got := resA[AMDDevice][0].CustomInfo[CUMaskKey].(string); got != maskA {
 		t.Fatalf("annotation mask %q != in-memory mask %q", maskA, got)

@@ -162,7 +162,7 @@ func buildCUMask(cuStart, cuCount int) string {
 // parseCUMask parses a ROC_GLOBAL_CU_MASK string (e.g. "0x3FF") back into a
 // *big.Int whose set bits are the allocated CU indices. It is the inverse of
 // buildCUMask and is used to reconstruct device occupancy from the persisted
-// hami.io/amd-cu-mask annotation of already-scheduled pods.
+// amd.com/cu-mask annotation of already-scheduled pods.
 func parseCUMask(mask string) (*big.Int, error) {
 	s := strings.TrimSpace(mask)
 	s = strings.TrimPrefix(s, "0x")
