@@ -70,11 +70,6 @@ func (m *PodManager) AddPod(pod *corev1.Pod, nodeID string, devices PodDevices) 
 			"devices", devices,
 		)
 	} else {
-		// Refresh the cached Pod too: the first AddPod (during bind) stores the
-		// pod before its scheduler annotations are patched, so the informer
-		// re-add carries the up-to-date annotations (e.g. amd.com/cu-mask that
-		// the AMD CU-bitmap reconstruction reads).
-		m.pods[pod.UID].Pod = pod
 		m.pods[pod.UID].Devices = devices
 		klog.V(5).InfoS("Pod devices updated",
 			"pod", klog.KRef(pod.Namespace, pod.Name),

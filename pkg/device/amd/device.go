@@ -160,6 +160,18 @@ func (dev *AMDDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]s
 		// this to inject ROC_GLOBAL_CU_MASK.
 		if cuMask := encodeCUMaskAnno(devlist); cuMask != "" {
 			(*annoinput)[AMDCUMaskAnno] = cuMask
+			// Also stamp it onto the pod object itself. Bind caches the pod
+			// (podManager.AddPod) right after this call but before the
+			// annotation is persisted to the API, and never refreshes that
+			// cached copy. Fit reconstructs the CU occupancy of already-
+			// scheduled pods from this annotation (rebuildCUBitmapFromPods), so
+			// the cached pod must carry it — otherwise reconstruction sees the
+			// pre-patch copy with no mask and hands out overlapping ranges.
+			// Doing it here keeps the fix confined to pkg/device/amd.
+			if pod.Annotations == nil {
+				pod.Annotations = map[string]string{}
+			}
+			pod.Annotations[AMDCUMaskAnno] = cuMask
 		}
 	}
 	klog.V(4).InfoS("annos", "input", (*annoinput))
