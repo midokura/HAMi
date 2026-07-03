@@ -69,15 +69,14 @@ func Test_CUMask_AnnotationRoundTrip(t *testing.T) {
 		t.Fatalf("annotation mask %q != in-memory mask %q", maskA, got)
 	}
 
-	// Reconstruct occupancy on a fresh device purely from the annotation,
-	// simulating how the scheduler rebuilds state from an already-scheduled pod
-	// whose decoded ContainerDevice carries no CustomInfo.
+	// Reconstruct occupancy on a fresh device purely from the annotation, the
+	// way the scheduler does in production: pod A is already scheduled onto the
+	// device (present in DeviceUsage.PodInfos) carrying only the amd.com/cu-mask
+	// annotation — its decoded ContainerDevice carries no CU CustomInfo. Fit
+	// rebuilds the bitmap from that annotation before allocating pod B.
 	existingPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: annosA}}
 	devsB := newDev()
-	ctrA := &device.ContainerDevice{UUID: "gpu-0", Type: AMDDevice}
-	if err := dev.AddResourceUsage(existingPod, devsB[0], ctrA); err != nil {
-		t.Fatalf("AddResourceUsage: %v", err)
-	}
+	devsB[0].PodInfos = []*device.PodInfo{{Pod: existingPod}}
 
 	// Pod B allocates 4 more CUs on the reconstructed device.
 	podB := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}

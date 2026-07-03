@@ -324,42 +324,19 @@ func (dev *AMDDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, 
 	n.Used++
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
-
-	// Reconstruct CU occupancy into the device bitmap so later allocations stay
-	// non-overlapping. The current scheduling cycle carries start/count in the
-	// in-memory ContainerDevice; already-scheduled pods carry the mask in the
-	// hami.io/amd-cu-mask annotation.
-	if n.CustomInfo == nil {
-		n.CustomInfo = make(map[string]any)
-	}
-	totalCUs := getTotalCUs(n.CustomInfo)
-	if totalCUs == 0 {
-		return nil
-	}
-	bitmap := getCUBitmap(n.CustomInfo, totalCUs)
-	if ctr.CustomInfo != nil {
-		if startRaw, ok := ctr.CustomInfo[CUStartKey]; ok {
-			if countRaw, ok := ctr.CustomInfo[CUCountKey]; ok {
-				if err := allocateCUs(bitmap, toInt(startRaw), toInt(countRaw)); err != nil {
-					klog.ErrorS(err, "Failed to apply CU allocation", "device", n.ID)
-				}
-				return nil
-			}
-		}
-	}
-	if mask := lookupCUMask(pod.GetAnnotations(), ctr.UUID); mask != "" {
-		if maskInt, err := parseCUMask(mask); err == nil {
-			bitmap.Or(bitmap, maskInt)
-		}
-	}
+	// CU-bitmap occupancy is owned entirely by Fit (rebuildCUBitmapFromPods
+	// reconstructs already-scheduled pods, tryAllocateCUs commits the current
+	// one into the same DeviceUsage). There is nothing to do here beyond the
+	// count bookkeeping above.
 	return nil
 }
 
 // rebuildCUBitmapFromPods reconstructs a device's CU occupancy bitmap from the
 // amd.com/cu-mask annotations of the pods already scheduled onto it. The shared
 // node-usage snapshot only accumulates core counts (Usedcores); it has no
-// knowledge of the AMD CU bitmap, so Fit calls this to rebuild occupancy from
-// scratch each scheduling cycle before selecting a non-overlapping range.
+// knowledge of the AMD CU bitmap, so Fit calls this to rebuild occupancy before
+// selecting a non-overlapping range. This is the single source of truth for CU
+// occupancy — Fit owns it; AddResourceUsage only tracks counts.
 func rebuildCUBitmapFromPods(dev *device.DeviceUsage) {
 	if dev.CustomInfo == nil {
 		return
@@ -368,11 +345,10 @@ func rebuildCUBitmapFromPods(dev *device.DeviceUsage) {
 	if totalCUs == 0 {
 		return
 	}
-	// OR each already-scheduled pod's mask into the current bitmap. The
-	// DeviceUsage is rebuilt fresh every scheduling cycle (its CustomInfo is a
-	// clone carrying only cu_total, no bitmap), so this is additive, not
-	// cumulative-across-cycles. OR-ing is idempotent if another path (e.g.
-	// AddResourceUsage) already marked the same range.
+	// Rebuild deterministically from scratch: drop any prior bitmap so the
+	// result depends only on the pods currently on the device, never on
+	// leftover state from an earlier Fit call on the same DeviceUsage.
+	delete(dev.CustomInfo, CUBitmapKey)
 	bitmap := getCUBitmap(dev.CustomInfo, totalCUs)
 	for _, pi := range dev.PodInfos {
 		if pi == nil || pi.Pod == nil {
